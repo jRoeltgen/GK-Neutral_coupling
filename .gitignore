@@ -1,6 +1,9 @@
 # Prerequisites
 *.d
 
+# Output data
+test_data/new*
+
 # Compiled Object files
 *.slo
 *.lo

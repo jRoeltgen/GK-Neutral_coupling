@@ -1,15 +1,17 @@
 import filecmp
 import eireneIO
+import numpy as np
 
-#filepath = "../step_Ne_eirene_data/" # Works
-filepath = "../step_D+T_eirene_data/" # Works 10/9
+filepath = "./test_data/" 
 edat = eireneIO.eirene(filepath)
+edat.load_extra_forts(filepath)
 edat.write_ft31(filepath+"new_fort.31")
 edat.write_ft44(filepath+"new_fort.44")
 edat.write_ft46(filepath+"new_fort.46")
 edat.triangle_mesh.write_ft33(filepath+"new_fort.33")
 edat.triangle_mesh.write_ft34(filepath+"new_fort.34")
 edat.triangle_mesh.write_ft35(filepath+"new_fort.35")
+epsilon = 5e-5
 
 all_true = True
 if (not filecmp.cmp(filepath+"fort.31",filepath+"new_fort.31", shallow=False)):
@@ -35,7 +37,12 @@ if (not filecmp.cmp(filepath+"fort.44",filepath+"new_fort.44", shallow=False)):
 if (not filecmp.cmp(filepath+"fort.46",filepath+"new_fort.46", shallow=False)):
     all_true = False
     print("Error. Fort.46 files differ")
-
+    
+flag = (np.abs(1-(1+edat.extra_source["D"]*1e6)/(1+edat.fort46["pdena"][:,0]))<epsilon).all()
+if (not flag):
+    all_true = False
+    print("Error. Fort.401 and pdena from fort.46 differ")
+    
 if all_true:
     print("No errors in eireneIO.")
     
