@@ -2,7 +2,7 @@ import filecmp
 import eireneIO
 import numpy as np
 
-filepath = "./test_data/" 
+filepath = "./test_data/eirene_data/" 
 edat = eireneIO.eirene(filepath)
 edat.load_extra_forts(filepath)
 edat.write_ft31(filepath+"new_fort.31")

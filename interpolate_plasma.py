@@ -359,21 +359,21 @@ def interpolate_LPFR(gmtry, gDat):
 
     return interpolate_block(gkylR, gkylZ, gField, keys, r, z, r_face, z_face, r_face_zc, z_face_rc)
 
-def interpolate_all(bdat, gdat):
-    gmtry = bdat.gmtry
-    bdat.interp_data = {}
+def interpolate_all(edat, gdat):
+    gmtry = edat.b2gmtry
+    edat.interp_data = {}
     print("Interpolate outer SOL")
-    bdat.interp_data["osol"]  = interpolate_OSOL(gmtry, gdat)
+    edat.interp_data["osol"]  = interpolate_OSOL(gmtry, gdat)
     print("Interpolate inner SOL")
-    bdat.interp_data["isol"]  = interpolate_ISOL(gmtry, gdat)
+    edat.interp_data["isol"]  = interpolate_ISOL(gmtry, gdat)
     print("Interpolate inner core")
-    bdat.interp_data["icore"] = interpolate_ICORE(gmtry, gdat)
+    edat.interp_data["icore"] = interpolate_ICORE(gmtry, gdat)
     print("Interpolate outer core")
-    bdat.interp_data["ocore"] = interpolate_OCORE(gmtry, gdat)
+    edat.interp_data["ocore"] = interpolate_OCORE(gmtry, gdat)
     print("Interpolate upper PFR")
-    bdat.interp_data["upfr"]  = interpolate_UPFR(gmtry, gdat)
+    edat.interp_data["upfr"]  = interpolate_UPFR(gmtry, gdat)
     print("Interpolate lower PFR")
-    bdat.interp_data["lpfr"]  = interpolate_LPFR(gmtry, gdat)
+    edat.interp_data["lpfr"]  = interpolate_LPFR(gmtry, gdat)
 
     keys = list(gdat.blocked_data.keys())
     Nx, Ny = gmtry['hx'].shape
@@ -384,34 +384,34 @@ def interpolate_all(bdat, gdat):
         field[k] = np.zeros((Nx, Ny), dtype=float)
 
         if k.lower() == 'Gamma_R'.lower():
-            field[k][innerDiv+2:-1, -1] = bdat.interp_data["osol"][k]
-            field[k][1:innerDiv, -1]  = bdat.interp_data["isol"][k]
+            field[k][innerDiv+2:-1, -1] = edat.interp_data["osol"][k]
+            field[k][1:innerDiv, -1]  = edat.interp_data["isol"][k]
             rng1 = np.arange(innerDiv-1, gmtry['leftcut'][1]-1, -1)
-            field[k][rng1, 1] = bdat.interp_data["upfr"][k][:len(rng1)]
+            field[k][rng1, 1] = edat.interp_data["upfr"][k][:len(rng1)]
             rng2 = np.arange(gmtry['rightcut'][1]+1, innerDiv+1, -1)
-            field[k][rng2, 1] = bdat.interp_data["upfr"][k][len(rng1):]
-            field[k][1:gmtry['leftcut'][0]+2, 1] = bdat.interp_data["lpfr"][k][:len(np.arange(1, gmtry['leftcut'][0]+2))]
-            field[k][gmtry['rightcut'][0]:-1, 1] = bdat.interp_data["lpfr"][k][len(np.arange(1, gmtry['leftcut'][0]+2)):]
+            field[k][rng2, 1] = edat.interp_data["upfr"][k][len(rng1):]
+            field[k][1:gmtry['leftcut'][0]+2, 1] = edat.interp_data["lpfr"][k][:len(np.arange(1, gmtry['leftcut'][0]+2))]
+            field[k][gmtry['rightcut'][0]:-1, 1] = edat.interp_data["lpfr"][k][len(np.arange(1, gmtry['leftcut'][0]+2)):]
         elif k.lower() == 'Gamma_Z'.lower():
             rng_end = np.arange(gmtry['topcut'][0]+1, Ny-1)
-            field[k][innerDiv+2, gmtry['topcut'][0]+1:-1] = bdat.interp_data["osol"][k][:len(rng_end)]
-            field[k][-1,       gmtry['topcut'][0]+1:-1]   = bdat.interp_data["osol"][k][len(rng_end):]
-            field[k][1,        gmtry['topcut'][0]+1:-1]   = bdat.interp_data["isol"][k][:len(rng_end)]
-            field[k][innerDiv, gmtry['topcut'][0]+1:-1] = bdat.interp_data["isol"][k][len(rng_end):]
-            field[k][[innerDiv, innerDiv+2], 1:gmtry['topcut'][0]+1] = bdat.interp_data["upfr"][k]
-            field[k][[1, gmtry['crx'].shape[0]-1], 1:gmtry['topcut'][0]+1] = bdat.interp_data["lpfr"][k]
-        else:
-            field[k][:innerDiv+1, gmtry['topcut'][0]+1:]    = bdat.interp_data["isol"][k]
-            field[k][innerDiv+1:, gmtry['topcut'][0]+1:]    = bdat.interp_data["osol"][k]
-            field[k][gmtry['leftcut'][0]+1:gmtry['leftcut'][1]+1, :gmtry['topcut'][0]+1] = bdat.interp_data["icore"][k]
-            field[k][gmtry['rightcut'][1]+1:gmtry['rightcut'][0]+1, :gmtry['topcut'][0]+1] = bdat.interp_data["ocore"][k]
-            blk1 = bdat.interp_data["upfr"][k][len(np.arange(innerDiv, gmtry['leftcut'][1]+1, -1))::-1, :]
-            blk2 = bdat.interp_data["upfr"][k][blk1.shape[0]:, :]
+            field[k][innerDiv+2, gmtry['topcut'][0]+1:-1] = edat.interp_data["osol"][k][:len(rng_end)]
+            field[k][-1,       gmtry['topcut'][0]+1:-1]   = edat.interp_data["osol"][k][len(rng_end):]
+            field[k][1,        gmtry['topcut'][0]+1:-1]   = edat.interp_data["isol"][k][:len(rng_end)]
+            field[k][innerDiv, gmtry['topcut'][0]+1:-1] = edat.interp_data["isol"][k][len(rng_end):]
+            field[k][[innerDiv, innerDiv+2], 1:gmtry['topcut'][0]+1] = edat.interp_data["upfr"][k]
+            field[k][[1, gmtry['crx'].shape[0]-1], 1:gmtry['topcut'][0]+1] = edat.interp_data["lpfr"][k]
+        else: #volume field
+            field[k][:innerDiv+1, gmtry['topcut'][0]+1:]    = edat.interp_data["isol"][k]
+            field[k][innerDiv+1:, gmtry['topcut'][0]+1:]    = edat.interp_data["osol"][k]
+            field[k][gmtry['leftcut'][0]+1:gmtry['leftcut'][1]+1, :gmtry['topcut'][0]+1] = edat.interp_data["icore"][k]
+            field[k][gmtry['rightcut'][1]+1:gmtry['rightcut'][0]+1, :gmtry['topcut'][0]+1] = edat.interp_data["ocore"][k]
+            blk1 = edat.interp_data["upfr"][k][len(np.arange(innerDiv, gmtry['leftcut'][1]+1, -1))::-1, :]
+            blk2 = edat.interp_data["upfr"][k][blk1.shape[0]:, :]
             field[k][gmtry['leftcut'][1]+1:innerDiv+1, :gmtry['topcut'][0]+1] = blk1
             field[k][innerDiv+1:gmtry['rightcut'][1]+1, :gmtry['topcut'][0]+1] = blk2[::-1]
 
-            field[k][:gmtry['leftcut'][0]+1, :gmtry['topcut'][0]+1] = bdat.interp_data["lpfr"][k][:gmtry['leftcut'][0]+1, :]
-            field[k][gmtry['rightcut'][0]+1:, :gmtry['topcut'][0]+1] = bdat.interp_data["lpfr"][k][gmtry['leftcut'][0]+1:, :]
+            field[k][:gmtry['leftcut'][0]+1, :gmtry['topcut'][0]+1] = edat.interp_data["lpfr"][k][:gmtry['leftcut'][0]+1, :]
+            field[k][gmtry['rightcut'][0]+1:, :gmtry['topcut'][0]+1] = edat.interp_data["lpfr"][k][gmtry['leftcut'][0]+1:, :]
 
     return field
 
@@ -451,26 +451,24 @@ def parallel_smooth(gmtry, field):
 
 # Load inputs (you should provide these variables)
 # ehl2data: numpy array Nx x M
-b2dat = b2.B2()
-b2dat_new = b2.B2()
-b2dat.read_b2fstate() # Read default file "./b2fstate"
-b2dat.read_b2fgmtry() # Read default file "./b2fgmtry"
+edat = eirene.eirene("./test_data/eirene_data/")
+b2dat = b2.B2("./test_data/b2_data/")
 gdat = gkyl.gkeyll_data()
-gdat.read_data("./ehl2data.txt")
-gdat.read_block_ind("./cells_ehl2data.txt")
+gdat.read_data("./test_data/gkeyll_data/ehl2data.txt")
+gdat.read_block_ind("./test_data/gkeyll_data/cells_ehl2data.txt")
 
 # Definitions
 b2dat.gmtry["R"] = b2dat.gmtry['crx'].mean(axis=2)
 b2dat.gmtry["Z"] = b2dat.gmtry['cry'].mean(axis=2)
 b2dat.gmtry["innerDiv"] = np.argmax(np.diff(b2dat.gmtry["R"][:, 0], n=1))
-
+edat.b2gmtry = b2dat.gmtry
 
 electron_charge = pyconst.elementary_charge
 
 gdat.regrid_data()
 gdat.replace_zero() # replace zeros of flux with NaNs
 
-fieldS = interpolate_all(b2dat, gdat)
+fieldS = interpolate_all(edat, gdat)
 
 maskr = fieldS['Gamma_R'] != 0
 maskp = fieldS['Gamma_Z'] != 0

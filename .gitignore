@@ -2,7 +2,7 @@
 *.d
 
 # Output data
-test_data/new*
+test_data/eirene_data/new*
 
 # Compiled Object files
 *.slo
