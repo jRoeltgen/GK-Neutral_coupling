@@ -2,6 +2,7 @@ from enum import Enum
 import pandas
 import numpy as np
 import math
+from shapely.geometry import Point, Polygon, MultiPolygon
 
 class topology(Enum):
     single_null = 1
@@ -24,11 +25,11 @@ class gkeyll_data:
     # Assumes column headers are R, Z, ni, ne, Ti, Te, upari, phi, Gamma_R, Gamma_Z
     # order is irrelevant
     def read_data(self, filename):
-        self.data = pandas.read_csv(filename, delim_whitespace=True)
+        self.data = pandas.read_csv(filename, sep=r'\s+')
 
     # Not sure what the format of this would be, so leaving it as a stub
     def read_block_ind(self, filename):
-        data = pandas.read_csv(filename, delim_whitespace=True)
+        data = pandas.read_csv(filename, sep=r'\s+')
         if(any(list(map(math.isnan,data["nR"]))) | any(list(map(math.isnan,data["nZ"])))):
            print("Error in reading number of cells/block")
            return
@@ -52,3 +53,29 @@ class gkeyll_data:
             if (key.lower() == "Gamma_R".lower() or (key.lower() == "Gamma_Z".lower())):
                 for block in self.blocked_data[key].keys():
                     self.blocked_data[key][block][self.blocked_data[key][block]==0] = np.nan
+
+    # The x,y indecies are the bottom left corner of the specified polygon,
+    #   so the corresponding polygon has points: (x,y), (x+1,y), (x+1, y+1), and (x, y+1)
+    def create_polygons(self):
+        if len(self.blocked_data)==0:
+            self.regrid_data()
+        self.blocked_data["polygons"] = {}
+        self.blocked_data["xind"] = {}
+        self.blocked_data["yind"] = {}
+        for block_key in self.blocked_data["R"]:
+            blockR = self.blocked_data["R"][block_key]
+            blockZ = self.blocked_data["Z"][block_key]
+            polygons = []
+            xind = []
+            yind = []
+            nZ, nR = blockR.shape
+            for x in range(nZ-1):
+                for y in range(nR-1):
+                    polygons.append(Polygon([(blockR[x,y],blockZ[x,y]),(blockR[x+1,y],blockZ[x+1,y]),
+                                    (blockR[x+1,y+1],blockZ[x+1,y+1]),(blockR[x,y+1],blockZ[x,y+1])]))
+                    xind.append(x)
+                    yind.append(y)
+            self.blocked_data["polygons"][block_key] = polygons
+            self.blocked_data["xind"][block_key] = xind
+            self.blocked_data["yind"][block_key] = yind                  
+                

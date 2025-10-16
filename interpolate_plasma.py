@@ -123,6 +123,15 @@ def unique_mean_by_xy(v, x, y):
     means = sums / counts
     return means, uniq
 
+def find_bracketing_field_lines(gkylR, gkylZ, r, z):
+    rg1D = gkylR.ravel()
+    zg1D = gkylZ.ravel()
+    nx, ny = z.shape
+    for zg in zg1D:
+        for i in range(nx):
+            z[i,:]-zg
+        
+
 # --- interpolate_block ---
 def interpolate_block(gkylR, gkylZ, gField, keys, r, z, r_face, z_face, r_face_zc, z_face_rc):
     NP = 20
@@ -239,18 +248,17 @@ def interpolate_OSOL(gmtry, gDat):
     keys = list(gDat.blocked_data.keys())
     gField = {k: np.vstack([gDat.blocked_data[k]["block1"], gDat.blocked_data[k]["block2"], gDat.blocked_data[k]["block3"]]) for k in keys}
 
-    r = gmtry['crx'][innerDiv+1:, gmtry['topcut'][0]+1:, :].mean(axis=2)
-    z = gmtry['cry'][innerDiv+1:, gmtry['topcut'][0]+1:, :].mean(axis=2)
+    r_coords = gmtry['crx'][innerDiv+1:, gmtry['topcut'][0]+1:, :]
+    z_coords = gmtry['cry'][innerDiv+1:, gmtry['topcut'][0]+1:, :]
+    r = r_coords.mean(axis=2)
+    z = z_coords.mean(axis=2)
 
-    r_face     = gmtry['crx'][innerDiv+2:-1, -1, [2,3]].mean(axis=1)
-    r_face_zc  = gmtry['cry'][innerDiv+2:-1, -1, [2,3]].mean(axis=1)
-    z_face     = np.hstack([
-        gmtry['cry'][innerDiv+2, gmtry['topcut'][0]+1:-1, [0,2]].mean(axis=0),
-        gmtry['cry'][-1,gmtry['topcut'][0]+1:-1, [0,2]].mean(axis=0)])
-    z_face_rc  = np.hstack([
-        gmtry['crx'][innerDiv+2, gmtry['topcut'][0]+1:-1, [0,2]].mean(axis=0),
-        gmtry['crx'][-1,         gmtry['topcut'][0]+1:-1, [0,2]].mean(axis=0),
-    ])
+    r_face     = r_coords[:, :, [2,3]].mean(axis=2)
+    r_face_zc  = z_coords[:, :, [2,3]].mean(axis=2)
+
+    z_face     = z_coords[:, :, [0,2]].mean(axis=2)
+    z_face_rc  = r_coords[:, :, [0,2]].mean(axis=2)
+
     return interpolate_block(gkylR, gkylZ, gField, keys, r, z, r_face, z_face, r_face_zc, z_face_rc)
 
 def interpolate_ISOL(gmtry, gDat):
@@ -463,15 +471,8 @@ b2dat.gmtry["Z"] = b2dat.gmtry['cry'].mean(axis=2)
 b2dat.gmtry["innerDiv"] = np.argmax(np.diff(b2dat.gmtry["R"][:, 0], n=1))
 edat.b2gmtry = b2dat.gmtry
 
-electron_charge = pyconst.elementary_charge
-
 gdat.regrid_data()
-gdat.replace_zero() # replace zeros of flux with NaNs
-
 fieldS = interpolate_all(edat, gdat)
-
-maskr = fieldS['Gamma_R'] != 0
-maskp = fieldS['Gamma_Z'] != 0
 
 fnax = b2dat.state['fna'][:, :, 0, 1].copy()
 fnay = b2dat.state['fna'][:, :, 1, 1].copy()
@@ -483,8 +484,8 @@ fnay[maskr] =  fieldS['Gamma_R'][maskr]
 
 # Write data
 state_new = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in b2dat.state.items()}
-state_new['te'] = np.maximum(fieldS['Te'], 1.1e-6) * electron_charge
-state_new['ti'] = np.maximum(fieldS['Ti'], 1.1e-6) * electron_charge
+state_new['te'] = np.maximum(fieldS['Te'], 1.1e-6) * pyconst.elementary_charge
+state_new['ti'] = np.maximum(fieldS['Ti'], 1.1e-6) * pyconst.elementary_charge
 state_new['ua'] = state_new['ua'].copy()
 state_new['ua'][:, :, 1] = fieldS['upari']
 state_new['na'] = state_new['na'].copy()
