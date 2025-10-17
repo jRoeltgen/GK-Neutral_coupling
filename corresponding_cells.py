@@ -1,6 +1,7 @@
 import B2IO as b2
 import read_gkyl as gkyl
 from shapely.geometry import Point, Polygon, MultiPolygon
+import numpy as np
 import pdb
 import time
 
@@ -28,29 +29,31 @@ def find_closest_point(p, gdat):
     return min_loc
 
 def check_single_polygon(p, gdat):
-    for block_key in gdat.blocked_data["xind"].keys():                
+    for block_key in gdat.blocked_data["polygons"].keys():                
         for k, poly in enumerate(gdat.blocked_data["polygons"][block_key]):
             if poly.contains(p):
-                bnum = int(block_key[-1])
+                bnum = int(block_key[5:])
                 xind = gdat.blocked_data["xind"][block_key][k]
                 yind = gdat.blocked_data["yind"][block_key][k]
-                return bnum, xind, yind, True
-    return -1, -1, -1, False
+                return bnum, xind, yind, True, poly
+    return -1, -1, -1, False, None
 
 def corresponding_polygon(gdat, bdat):
     r = np.mean(bdat.gmtry["crx"],axis=2)
     z = np.mean(bdat.gmtry["cry"],axis=2)
     nx, ny = r.shape
     gkyl_poly_for_b2 = {"block": np.zeros((nx,ny)), "xyind": np.zeros((nx,ny,2),dtype=int),
-                        "contained":np.full((nx,ny), False, dtype=bool)}
+                        "contained":np.full((nx,ny), False, dtype=bool), "polygon": []}
+    gkyl_poly_for_b2["polygon"] = [[0]*ny for _ in range(nx)]
     for i in range(nx):
         print(f"i={i}")
         for j in range(ny):
             p = Point(r[i,j],z[i,j])
-            bnum, xind, yind, found = check_single_polygon(p,gdat)
+            bnum, xind, yind, found, poly = check_single_polygon(p,gdat)
             gkyl_poly_for_b2["block"][i,j] = bnum
             gkyl_poly_for_b2["xyind"][i,j,:] = np.array([xind, yind])
             gkyl_poly_for_b2["contained"][i,j] = found
+            gkyl_poly_for_b2["polygon"][i][j] = poly
             if not found:
                 ind = find_closest_point(p, gdat)
                 gkyl_poly_for_b2["xyind"][i,j,:] = ind
@@ -61,7 +64,7 @@ def corresponding_polygon(gdat, bdat):
 b2dat = b2.B2("../../../solps/")
 gdat = gkyl.gkeyll_data()
 gdat.read_data("./test_data/gkeyll_data/ehl2data.txt")
-gdat.read_block_ind("./test_data/gkeyll_data/cells_ehl2data.txt")
+gdat.read_block_ind("./test_data/gkeyll_data/cells_ehl2data_copy.txt")
 gdat.regrid_data()
 gdat.create_polygons()
 start_time = time.perf_counter()
