@@ -67,9 +67,9 @@ class gkeyllGeom:
                 if R > self.blocks[10].arc_ctx["rstart"]: #Outer Core
                     block = 10
                     gt = self.blocks[10]
-                    gt.arc_ctx["right"] = True if R > gt.arc_ctx["rminturn"] else False
-                    gt.arc_ctx["pre"] = False if R > gt.arc_ctx["rminturn"] else True
-                    gt.arc_ctx["rclose"] = gt.arc_ctx["rright"] if R > gt.arc_ctx["rminturn"] else gt.arc_ctx["rleft"]
+                    gt.arc_ctx["right"] = True if R >= gt.arc_ctx["rminturn"] else False
+                    gt.arc_ctx["pre"] = True if R < gt.arc_ctx["rminturn"] and Z < gt.efit.zmaxis else False
+                    gt.arc_ctx["rclose"] = gt.arc_ctx["rright"] if R >= gt.arc_ctx["rminturn"] else gt.arc_ctx["rleft"]
                 else: #Inner Core
                     self.blocks[11].find_endpoints(psi)
                     block = 11
