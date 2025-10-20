@@ -19,6 +19,51 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from numba import njit
+
+@njit
+def calc_roots_numba_core(psicoeffs, psi0, Z, Rmid, Zmid, dR, dZ, rmin, rmax):
+    nR = psicoeffs.shape[0]
+    R_out = np.full((nR, 2), np.nan)
+    dRdZ_out = np.full((nR, 2), np.nan)
+    nsol = np.zeros(nR, dtype=np.int32)
+
+    for i in range(nR):
+        psi = psicoeffs[i]
+        y = (Z - Zmid[i]) / (dZ * 0.5)
+
+        aq = 0.125 * (45.0*psi[8]*y**2 + 23.2379000772445*psi[6]*y - 15.0*psi[8] + 13.41640786499874*psi[4])
+        bq = 0.125 * (23.2379000772445*psi[7]*y**2 + 12.0*psi[3]*y - 7.745966692414834*psi[7] + 6.928203230275509*psi[1])
+        cq = 0.125 * ((13.41640786499874*psi[5]-15.0*psi[8])*y**2
+                      + (6.928203230275509*psi[2]-7.745966692414834*psi[6])*y
+                      + 5.0*psi[8] - 4.47213595499958*(psi[5]+psi[4]) + 4.0*psi[0]) - psi0
+
+        delta2 = bq*bq - 4*aq*cq
+        if delta2 > 0:
+            delta = np.sqrt(delta2)
+            signb = 1.0 if bq >= 0 else -1.0
+            qq = -0.5*(bq + signb*delta)
+            r1 = qq/aq
+            r2 = cq/qq
+
+            for k, r in enumerate((r1, r2)):
+                if (-1.0 <= r < 1.0):
+                    x = r
+                    C = 0.125*(x**2*(90.0*psi[8]*y + 23.2379000772445*psi[6])
+                               + x*(46.47580015448901*psi[7]*y + 12.0*psi[3])
+                               + 2*(13.41640786499874*psi[5]-15.0*psi[8])*y
+                               - 7.745966692414834*psi[6] + 6.928203230275509*psi[2])
+                    A = 0.125*(2*x*(45.0*psi[8]*y**2 + 23.2379000772445*psi[6]*y - 15.0*psi[8] + 13.41640786499874*psi[4])
+                               + 23.2379000772445*psi[7]*y**2 + 12.0*psi[3]*y
+                               - 7.745966692414834*psi[7] + 6.928203230275509*psi[1])
+                    R_val = r * dR * 0.5 + Rmid[i]
+                    if rmin < R_val < rmax:
+                        R_out[i, k] = R_val
+                        dRdZ_out[i, k] = -C/A * dR/dZ
+                        nsol[i] += 1
+
+    return nsol, R_out, dRdZ_out
+
 class gkeyllTracer:
     def __init__(self, efit, gridspec:dict={}):
         self.efit = efit
@@ -54,84 +99,17 @@ class gkeyllTracer:
         self.contour_ctx = { }
 
     def __calc_roots(self, psi, psi0, Z, xc, dx):
-        """
-        Vectorized version of __calc_roots.
-        psi : array of shape (N, 9)
-        psi0 : scalar
-        Z : scalar
-        xc : (2, N) array or (2,) for scalar mode
-        dx : (2,) array [dR, dZ]
-        """
-        psi = np.atleast_2d(psi)           # shape (N,9)
-        N = psi.shape[0]
-        Rmid = np.atleast_1d(xc[0])        # shape (N,)
-        Zmid = np.atleast_1d(xc[1])
+        Rmid, Zmid = xc
         dR, dZ = dx
-    
-        # normalized coordinate
-        y = (Z - Zmid) / (dZ * 0.5)
-    
-        # --- Quadratic coefficients (vectorized)
-        aq = 0.125*(45.0*psi[:,8]*y**2 + 23.2379000772445*psi[:,6]*y - 15.0*psi[:,8] + 13.41640786499874*psi[:,4])
-        bq = 0.125*(23.2379000772445*psi[:,7]*y**2 + 12.0*psi[:,3]*y - 7.745966692414834*psi[:,7] + 6.928203230275509*psi[:,1])
-        cq = 0.125*((13.41640786499874*psi[:,5]-15.0*psi[:,8])*y**2
-                    + (6.928203230275509*psi[:,2]-7.745966692414834*psi[:,6])*y
-                    + 5.0*psi[:,8] - 4.47213595499958*(psi[:,5]+psi[:,4]) + 4.0*psi[:,0]) - psi0
-    
-        delta2 = bq*bq - 4*aq*cq
-        valid = delta2 > 0
-        delta = np.zeros_like(delta2)
-        delta[valid] = np.sqrt(delta2[valid])
-    
-        # --- Compute roots only for valid points
-        bqv = bq[valid]
-        aqv = aq[valid]
-        cqv = cq[valid]
-        deltav = delta[valid]
-    
-        # avoid divide-by-zero
-        signb = np.sign(bqv)
-        signb[signb == 0] = 1.0
-        qq = -0.5*(bqv + signb*deltav)
-        r1 = qq / aqv
-        r2 = cqv / qq
-    
-        # Both r1, r2 shape (M,)
-        # Filter for |r| < 1
-        mask1 = (-1 <= r1) & (r1 < 1)
-        mask2 = (-1 <= r2) & (r2 < 1)
-    
-        # Prepare arrays for output
-        R_out = np.full((N, 2), np.nan)
-        dRdZ_out = np.full((N, 2), np.nan)
-        nsol = np.zeros(N, dtype=int)
-    
-        # For valid indices only
-        idx_valid = np.flatnonzero(valid)
-        for i, ridx in enumerate(idx_valid):
-            coeffs = psi[ridx]
-            yv = y[ridx]
-            Rm = Rmid[ridx]
-            for k, (rval, mask) in enumerate([(r1[i], mask1[i]), (r2[i], mask2[i])]):
-                if not mask:
-                    continue
-                x = rval
-                # compute C and A (vectorized expressions)
-                C = 0.125*(x**2*(90.0*coeffs[8]*yv + 23.2379000772445*coeffs[6])
-                           + x*(46.47580015448901*coeffs[7]*yv + 12.0*coeffs[3])
-                           + 2*(13.41640786499874*coeffs[5] - 15.0*coeffs[8])*yv
-                           - 7.745966692414834*coeffs[6] + 6.928203230275509*coeffs[2])
-                A = 0.125*(2*x*(45.0*coeffs[8]*yv**2 + 23.2379000772445*coeffs[6]*yv - 15.0*coeffs[8] + 13.41640786499874*coeffs[4])
-                           + 23.2379000772445*coeffs[7]*yv**2 + 12.0*coeffs[3]*yv
-                           - 7.745966692414834*coeffs[7] + 6.928203230275509*coeffs[1])
-                R_out[ridx, k] = rval * dR * 0.5 + Rm
-                dRdZ_out[ridx, k] = -C/A * dR/dZ
-                nsol[ridx] += 1
-    
+
+        nsol, R_out, dRdZ_out = calc_roots_numba_core(
+            psi, psi0, Z, Rmid, Zmid, dR, dZ, self.rmin, self.rmax
+        )
+
         return {
-            "nsol": nsol,         # array (N,)
-            "R": R_out,           # shape (N,2)
-            "dRdZ": dRdZ_out,     # shape (N,2)
+            "nsol": nsol,
+            "R": R_out,
+            "dRdZ": dRdZ_out
         }
 
 
