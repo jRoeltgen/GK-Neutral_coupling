@@ -204,11 +204,33 @@ class gkeyllTracer:
         return math.sqrt(1+dRdZ*dRdZ) if nR > 0 else 0.0;
 
 
-    def integrate_psi_contour(self, psi:float, zmin, zmax, rclose:float) :
-        self.contour_ctx["psi"] = psi
-        self.contour_ctx["rclose"] = rclose
-        res, err = sci.quad(self.__contour_func, zmin, zmax)
-        return res;
+    #def integrate_psi_contour(self, psi:float, zmin, zmax, rclose:float) :
+    #    self.contour_ctx["psi"] = psi
+    #    self.contour_ctx["rclose"] = rclose
+    #    res, err = sci.quad(self.__contour_func, zmin, zmax)
+    #    return res;
+
+    def integrate_psi_contour(self, psi: float, zmin, zmax, rclose: float, npts: int = 500):
+        Zs = np.linspace(zmin, zmax, npts)
+        psi_arr = np.full_like(Zs, psi)
+        rclose_arr = np.full_like(Zs, rclose)
+
+        # Vectorized version of contour_func
+        R_vals = np.zeros_like(Zs)
+        dRdZ_vals = np.zeros_like(Zs)
+
+        for i, Z in enumerate(Zs):
+            nR, aR, adRdZ = self.R_psiZ(psi, Z)
+            if nR > 0:
+                minidx = np.argmin(np.abs(aR - rclose))
+                dRdZ_vals[i] = adRdZ[minidx]
+                R_vals[i] = math.sqrt(1 + dRdZ_vals[i]**2)
+            else:
+                R_vals[i] = 0.0
+
+        # Integrate numerically using Simpson’s rule
+        res = sci.simpson(R_vals, Zs)
+        return res
 
     def __ridders_integrate_psi_contour(self, Z, rclose) :
         self.contour_ctx["psi"] = self.arc_ctx['psi']
