@@ -5,7 +5,7 @@ import os
 import pickle
 
 class gkeyllGeom:
-    def __init__(self, load_from=None, efit=None, gridspec:list=None, fromFile=None):
+    def __init__(self, load_from=None, efit=None, gridspec:list=None):
         if load_from is not None and os.path.exists(load_from):
              print(f"Loading from pickle: {load_from}")
              with open(load_from, "rb") as f:
@@ -99,11 +99,14 @@ class gkeyllGeom:
                 self.blocks[2].find_endpoints(psi)
                 if Z < self.blocks[2].arc_ctx["zmin"]:
                     self.blocks[1].find_endpoints(psi)
+                    block = 1
                     gt = self.blocks[1]
                 elif Z < self.blocks[2].arc_ctx["zmax"]:
+                    block = 2
                     gt = self.blocks[2]
                 else:
                     self.blocks[3].find_endpoints(psi)
+                    block = 3
                     gt = self.blocks[3]
 
         arcL = gt.arc_length_func(Z)

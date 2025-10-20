@@ -54,72 +54,135 @@ class gkeyllTracer:
         self.contour_ctx = { }
 
     def __calc_roots(self, psi, psi0, Z, xc, dx):
-        sol = {}
-        sol["nsol"] = 0;
-        sol["R"] = np.zeros(4, dtype='float')
-        sol["dRdZ"] = np.zeros(4, dtype='float')
-        y = (Z-xc[1])/(dx[1]*0.5);
-        
-        aq = 0.125*(45.0*psi[8]*y**2+23.2379000772445*psi[6]*y-15.0*psi[8]+13.41640786499874*psi[4]);
-        bq = 0.125*(23.2379000772445*psi[7]*y**2+12.0*psi[3]*y-7.745966692414834*psi[7]+6.928203230275509*psi[1]) ;
-        cq = 0.125*((13.41640786499874*psi[5]-15.0*psi[8])*y**2+(6.928203230275509*psi[2]-7.745966692414834*psi[6])*y+5.0*psi[8]- 4.47213595499958*psi[5]-4.47213595499958*psi[4]+4.0*psi[0] ) - psi0;
-        delta2 = bq*bq - 4*aq*cq;
-        
-        if delta2 > 0 :
-            delta = math.sqrt(delta2);
-            qq = -0.5*(bq + (bq/math.fabs(bq)) * delta);
-            r1 = qq/aq;
-            r2 = cq/qq;
-            
-            sidx = 0;
-            if ((-1<=r1) and (r1 < 1)):
-                sol["nsol"] += 1;
-                sol["R"][sidx] = r1*dx[0]*0.5 + xc[0];
-                
-                x = r1;
-                C = 0.125*(x**2*(90.0*psi[8]*y+23.2379000772445*psi[6])+x*(46.47580015448901*psi[7]*y+12.0*psi[3])+2* (13.41640786499874*psi[5]-15.0*psi[8])*y-7.745966692414834*psi[6]+6.928203230275509*psi[2]) ;
-                A = 0.125*(2*x*(45.0*psi[8]*y**2+23.2379000772445*psi[6]*y-15.0*psi[8]+13.41640786499874*psi[4])+23.2379000772445*psi[7]*y**2+12.0*psi[3]*y-7.745966692414834*psi[7]+6.928203230275509*psi[1]); 
-                sol["dRdZ"][sidx] = -C/A*dx[0]/dx[1];
-                sidx += 1;
+        """
+        Vectorized version of __calc_roots.
+        psi : array of shape (N, 9)
+        psi0 : scalar
+        Z : scalar
+        xc : (2, N) array or (2,) for scalar mode
+        dx : (2,) array [dR, dZ]
+        """
+        psi = np.atleast_2d(psi)           # shape (N,9)
+        N = psi.shape[0]
+        Rmid = np.atleast_1d(xc[0])        # shape (N,)
+        Zmid = np.atleast_1d(xc[1])
+        dR, dZ = dx
+    
+        # normalized coordinate
+        y = (Z - Zmid) / (dZ * 0.5)
+    
+        # --- Quadratic coefficients (vectorized)
+        aq = 0.125*(45.0*psi[:,8]*y**2 + 23.2379000772445*psi[:,6]*y - 15.0*psi[:,8] + 13.41640786499874*psi[:,4])
+        bq = 0.125*(23.2379000772445*psi[:,7]*y**2 + 12.0*psi[:,3]*y - 7.745966692414834*psi[:,7] + 6.928203230275509*psi[:,1])
+        cq = 0.125*((13.41640786499874*psi[:,5]-15.0*psi[:,8])*y**2
+                    + (6.928203230275509*psi[:,2]-7.745966692414834*psi[:,6])*y
+                    + 5.0*psi[:,8] - 4.47213595499958*(psi[:,5]+psi[:,4]) + 4.0*psi[:,0]) - psi0
+    
+        delta2 = bq*bq - 4*aq*cq
+        valid = delta2 > 0
+        delta = np.zeros_like(delta2)
+        delta[valid] = np.sqrt(delta2[valid])
+    
+        # --- Compute roots only for valid points
+        bqv = bq[valid]
+        aqv = aq[valid]
+        cqv = cq[valid]
+        deltav = delta[valid]
+    
+        # avoid divide-by-zero
+        signb = np.sign(bqv)
+        signb[signb == 0] = 1.0
+        qq = -0.5*(bqv + signb*deltav)
+        r1 = qq / aqv
+        r2 = cqv / qq
+    
+        # Both r1, r2 shape (M,)
+        # Filter for |r| < 1
+        mask1 = (-1 <= r1) & (r1 < 1)
+        mask2 = (-1 <= r2) & (r2 < 1)
+    
+        # Prepare arrays for output
+        R_out = np.full((N, 2), np.nan)
+        dRdZ_out = np.full((N, 2), np.nan)
+        nsol = np.zeros(N, dtype=int)
+    
+        # For valid indices only
+        idx_valid = np.flatnonzero(valid)
+        for i, ridx in enumerate(idx_valid):
+            coeffs = psi[ridx]
+            yv = y[ridx]
+            Rm = Rmid[ridx]
+            for k, (rval, mask) in enumerate([(r1[i], mask1[i]), (r2[i], mask2[i])]):
+                if not mask:
+                    continue
+                x = rval
+                # compute C and A (vectorized expressions)
+                C = 0.125*(x**2*(90.0*coeffs[8]*yv + 23.2379000772445*coeffs[6])
+                           + x*(46.47580015448901*coeffs[7]*yv + 12.0*coeffs[3])
+                           + 2*(13.41640786499874*coeffs[5] - 15.0*coeffs[8])*yv
+                           - 7.745966692414834*coeffs[6] + 6.928203230275509*coeffs[2])
+                A = 0.125*(2*x*(45.0*coeffs[8]*yv**2 + 23.2379000772445*coeffs[6]*yv - 15.0*coeffs[8] + 13.41640786499874*coeffs[4])
+                           + 23.2379000772445*coeffs[7]*yv**2 + 12.0*coeffs[3]*yv
+                           - 7.745966692414834*coeffs[7] + 6.928203230275509*coeffs[1])
+                R_out[ridx, k] = rval * dR * 0.5 + Rm
+                dRdZ_out[ridx, k] = -C/A * dR/dZ
+                nsol[ridx] += 1
+    
+        return {
+            "nsol": nsol,         # array (N,)
+            "R": R_out,           # shape (N,2)
+            "dRdZ": dRdZ_out,     # shape (N,2)
+        }
 
-            if (-1<=r2) and (r2 < 1) :
-                sol["nsol"] += 1;
-                sol["R"][sidx] = r2*dx[0]*0.5 + xc[0];
-                
-                x = r2;
-                C = 0.125*(x**2*(90.0*psi[8]*y+23.2379000772445*psi[6])+x*(46.47580015448901*psi[7]*y+12.0*psi[3])+2* (13.41640786499874*psi[5]-15.0*psi[8])*y-7.745966692414834*psi[6]+6.928203230275509*psi[2]) ;
-                A = 0.125*(2*x*(45.0*psi[8]*y**2+23.2379000772445*psi[6]*y-15.0*psi[8]+13.41640786499874*psi[4])+23.2379000772445*psi[7]*y**2+12.0*psi[3]*y-7.745966692414834*psi[7]+6.928203230275509*psi[1]); 
-                sol["dRdZ"][sidx] = -C/A*dx[0]/dx[1];
-                sidx += 1;
 
-        return sol
+    def R_psiZ(self, psi: float, Z: float):
+        """
+        Vectorized version of R_psiZ using __calc_roots_vectorized.
+        Returns (sidx, R, dRdZ) where sidx = number of valid intersections.
+        """
+        # Output arrays (fixed-size, 4 slots max)
+        R = np.zeros(4, dtype=float)
+        dRdZ = np.zeros(4, dtype=float)
 
-    def R_psiZ(self, psi:float, Z:float) :
-        R = np.zeros(4, dtype='float')
-        dRdZ = np.zeros(4, dtype='float')
-        idxtemp = math.floor((Z - self.efit.Zgrid[0])/self.efit.dZ)
-        idxtemp = min(idxtemp, self.efit.nZ-1)
-        idxtemp = max(idxtemp, 0)
-        zidx = idxtemp
-        
-        sidx = 0
-        idx = [ 0, zidx]
-        dx = [self.efit.dR, self.efit.dZ]
-        
-        
-        for ridx in range(0, self.efit.nR):
-            psih = self.efit.psicoeffs[ridx, zidx]
-            xc = [ (self.efit.Rgrid[ridx] + self.efit.Rgrid[ridx+1])/2.0, (self.efit.Zgrid[zidx] + self.efit.Zgrid[zidx+1])/2.0]
-            sol = self.__calc_roots(psih, psi, Z, xc, dx)
-            if sol["nsol"] > 0 : 
-                for s in range(0, sol["nsol"]):
-                    if sol["R"][s] > self.rmin and sol["R"][s] < self.rmax :
-                        R[sidx] = sol["R"][s]
-                        dRdZ[sidx] = sol["dRdZ"][s]
-                        sidx+=1
+        # --- Find nearest Z index
+        idxtemp = int((Z - self.efit.Zgrid[0]) / self.efit.dZ)
+        zidx = np.clip(idxtemp, 0, self.efit.nZ - 1)
 
+        # --- Prepare arrays for all R grid points
+        nR = self.efit.nR
+        Rgrid = self.efit.Rgrid
+        Zgrid = self.efit.Zgrid
+        psicoeffs = self.efit.psicoeffs
+
+        Rmid = 0.5 * (Rgrid[:-1] + Rgrid[1:])  # shape (nR,)
+        Zmid = np.full_like(Rmid, 0.5 * (Zgrid[zidx] + Zgrid[zidx + 1]))
+
+        dx = np.array([self.efit.dR, self.efit.dZ])
+
+        # --- Call the vectorized root solver
+        sol = self.__calc_roots(
+            psi=psicoeffs[:, zidx],   # shape (nR, 9)
+            psi0=psi,
+            Z=Z,
+            xc=(Rmid, Zmid),
+            dx=dx
+        )
+
+        # --- Extract and flatten valid solutions
+        R_all = sol["R"].ravel()
+        dRdZ_all = sol["dRdZ"].ravel()
+        valid = np.isfinite(R_all) & (R_all > self.rmin) & (R_all < self.rmax)
+
+        R_valid = R_all[valid]
+        dRdZ_valid = dRdZ_all[valid]
+        sidx = min(len(R_valid), 4)
+
+        if sidx > 0:
+            R[:sidx] = R_valid[:sidx]
+            dRdZ[:sidx] = dRdZ_valid[:sidx]
 
         return sidx, R, dRdZ
+
 
 
     def __tok_plate_psi_func(self, s):

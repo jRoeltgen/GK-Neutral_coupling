@@ -191,7 +191,7 @@ inp = [inp0, inp1, inp2, inp3, inp4, inp5, inp6, inp7, inp8, inp9, inp10, inp11]
 # #gefit.Rxpt = np.array([2.489562969077551, 2.489562969077551])
 # #gefit.Zxpt = np.array([-6.18070007806902,  6.18070007806902])
 # #gefit.psisep=1.5092
-# gg = gkeyllGeom.gkeyllGeom(gefit, inp)
+# gg = gkeyllGeom.gkeyllGeom(efit = gefit, gridspec = inp)
 
 #If loading from file we can do this:
 gg = gkeyllGeom.gkeyllGeom('./gkeyllGeometry/stored_data/gkeyllGeometry.pkl')
