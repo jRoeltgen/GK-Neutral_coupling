@@ -174,11 +174,11 @@ class gkeyllTracer:
         res, err = sci.quad(self.__contour_func, zmin, zmax)
         return res;
 
-    def __ridders_integrate_psi_contour(self, Z, rclose) :
+    def __ridders_integrate_psi_contour(self, Z, rclose, ref) :
         self.contour_ctx["psi"] = self.arc_ctx['psi']
         self.contour_ctx["rclose"] = rclose
         res, err = sci.quad(self.__contour_func, self.arc_ctx["zmin"], Z)
-        return res - self.arc_ctx["arcL_start"]
+        return res - ref
 
     def find_upper_turning_point(self, psi_curr, zlo, tolerance=1e-12):
         zup=self.arc_ctx["zmax"].copy()
@@ -464,11 +464,12 @@ class gkeyllTracer:
                 arc_ctx["arcL_start"] = extra_arcL / 2.0
 
             # Need to set the location of rstart,zstart associated with arcL_start
+            arcL_ref = arc_ctx["arcL_start"]
             a = arc_ctx["zmin"]
             b = geo.zmaxis
-            fa = - arc_ctx["arcL_start"]
-            fb = self.__ridders_integrate_psi_contour(b, arc_ctx["rleft"]) - arc_ctx["arcL_start"]
-            arc_ctx["zstart"] = sco.ridder(self.__ridders_integrate_psi_contour, a, b, args = (self.arc_ctx["rleft"]))
+            fa = self.__ridders_integrate_psi_contour(a, arc_ctx["rleft"],arcL_ref)
+            fb = self.__ridders_integrate_psi_contour(b, arc_ctx["rleft"],arcL_ref)
+            arc_ctx["zstart"] = sco.ridder(self.__ridders_integrate_psi_contour, a, b, args = (self.arc_ctx["rleft"], arcL_ref))
             nR, aR, adRdZ = self.R_psiZ(self.arc_ctx["psi"], self.arc_ctx["zstart"])
             minidx = np.argmin(np.abs(aR - self.arc_ctx["rleft"]))
             self.arc_ctx["rstart"] = aR[minidx]

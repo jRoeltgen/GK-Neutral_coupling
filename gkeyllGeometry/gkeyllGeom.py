@@ -83,11 +83,13 @@ class gkeyllGeom:
         elif psi  < self.efit.psisep: #Outside
             if R < self.efit.Rxpt[0] : #Inboard SOL
                 self.blocks[7].find_endpoints(psi)
-                if Z > self.blocks[7].arc_ctx["zmax"]:
+                #if Z > self.blocks[7].arc_ctx["zmax"]:
+                if Z > self.blocks[7].efit.Zxpt[1]:
                     self.blocks[6].find_endpoints(psi)
                     block = 6
                     gt = self.blocks[6]
-                elif Z > self.blocks[7].arc_ctx["zmin"]:
+                #elif Z > self.blocks[7].arc_ctx["zmin"]:
+                elif Z > self.blocks[7].efit.Zxpt[0]:
                     block = 7
                     gt = self.blocks[7]
                 else:
@@ -97,11 +99,13 @@ class gkeyllGeom:
 
             else: #Outboard SOL
                 self.blocks[2].find_endpoints(psi)
-                if Z < self.blocks[2].arc_ctx["zmin"]:
+                #if Z < self.blocks[2].arc_ctx["zmin"]:
+                if Z < self.blocks[2].efit.Zxpt[0]:
                     self.blocks[1].find_endpoints(psi)
                     block = 1
                     gt = self.blocks[1]
-                elif Z < self.blocks[2].arc_ctx["zmax"]:
+                #elif Z < self.blocks[2].arc_ctx["zmax"]:
+                elif Z < self.blocks[2].efit.Zxpt[1]:
                     block = 2
                     gt = self.blocks[2]
                 else:

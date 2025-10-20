@@ -44,6 +44,11 @@ class gkeyll:
         self.base_name = self.sim_dir+name
         self.sim_names = ['%s_b%d'%(self.base_name,i) for i in range(self.bmin,self.bmax)]
 
+        #Set up empty block data
+        self.mom_data_list = [None]*12
+        self.grid_list = [None]*12
+        self.coeff_data_list = [None]*12
+
 
 
 
@@ -68,8 +73,6 @@ class gkeyll:
         x0,z0 = np.meshgrid(x,z)
         return myinterpolator((x0,z0)).T
 
-
-
     def read_data(self, frame):
         if(self.half_domain):
             self.__read_data_half_domain(frame)
@@ -79,14 +82,230 @@ class gkeyll:
     def __read_data_full_domain(self, frame):
         print("Full Domain Not Implemented Yet")
 
+    def read_coeffs(self, frame):
+        if(self.half_domain):
+            self.__read_coeffs_half_domain(frame)
+        else:
+            self.__read_coeffs_full_domain(frame)
+
+    def __read_coeffs_full_domain(self, frame):
+        print("Full Domain Not Implemented Yet")
+
+    def read_geometry(self):
+        if(self.half_domain):
+            self.__read_geometry_half_domain()
+        else:
+            self.__read_geometry_full_domain()
+
+    def __read_geometry_full_domain(self, frame):
+        print("Full Domain Not Implemented Yet")
+
+    def __read_geometry_half_domain(self):
+        half_grid_list = []
+        for isim, sim_name in enumerate(self.sim_names):
+            grid = {}
+            mdata = pg.GData('%s-bmag.gkyl'%sim_name)
+            x, z = mdata.get_grid()
+            grid["x"] = x
+            grid["z"] = z
+            grid["xc"] = self.__fix_gridvals(x)
+            grid["zc"] = self.__fix_gridvals(z)
+            # Append data
+            half_grid_list.append(grid)
+
+        grid_list = self.grid_list
+
+        #Unmodified but renumbered blocks
+        grid_list[0] = half_grid_list[0]
+        grid_list[1] = half_grid_list[1]
+        grid_list[8] = half_grid_list[4]
+        grid_list[9] = half_grid_list[5]
+        
+        
+        # Reflected blocks
+        grid_list[3] = {}
+        grid_list[6] = {}
+        grid_list[4] = {}
+        grid_list[5] = {}
+
+        # Doubled blocks
+        grid_list[2] = {}
+        grid_list[7] = {}
+        grid_list[10] = {}
+        grid_list[11] = {}
+
+        #Do x myself manually
+        grid_list[3]["x"] = grid_list[1]["x"]
+        grid_list[6]["x"] = grid_list[8]["x"]
+        grid_list[4]["x"] = grid_list[0]["x"]
+        grid_list[5]["x"] = grid_list[9]["x"]
+        
+        grid_list[2]["x"] = grid_list[1]["x"]
+        grid_list[7]["x"] = grid_list[8]["x"]
+        grid_list[10]["x"] = half_grid_list[6]["x"]
+        grid_list[11]["x"] = half_grid_list[7]["x"]
+
+        #Do z myself manually
+        grid_list[3]["z"] = -np.flip(grid_list[1]["z"])
+        grid_list[6]["z"] = -np.flip(grid_list[8]["z"])
+        grid_list[4]["z"] = -np.flip(grid_list[0]["z"])
+        grid_list[5]["z"] = -np.flip(grid_list[9]["z"])
+        
+        grid_list[2]["z"] = np.r_[half_grid_list[2]["z"], -np.flip(half_grid_list[2]["z"][:-1])]
+        grid_list[7]["z"] = np.r_[-np.flip(half_grid_list[3]["z"][1:]), half_grid_list[3]["z"]]
+        grid_list[10]["z"] = np.array([half_grid_list[6]["z"][0] + np.diff(half_grid_list[6]["z"])[0]*i for i in range(2*len(half_grid_list[6]["z"])-1)])
+        grid_list[11]["z"] = np.flip(np.array([half_grid_list[7]["z"][-1] - np.diff(half_grid_list[7]["z"])[0]*i for i in range(2*len(half_grid_list[7]["z"])-1)]))
+
+        #Do xc myself manually
+        grid_list[3]["xc"] = grid_list[1]["xc"]
+        grid_list[6]["xc"] = grid_list[8]["xc"]
+        grid_list[4]["xc"] = grid_list[0]["xc"]
+        grid_list[5]["xc"] = grid_list[9]["xc"]
+        
+        grid_list[2]["xc"] = grid_list[1]["xc"]
+        grid_list[7]["xc"] = grid_list[8]["xc"]
+        grid_list[10]["xc"] = half_grid_list[6]["xc"]
+        grid_list[11]["xc"] = half_grid_list[7]["xc"]
+
+        #Do zc myself manually
+        grid_list[3]["zc"] = -np.flip(grid_list[1]["zc"])
+        grid_list[6]["zc"] = -np.flip(grid_list[8]["zc"])
+        grid_list[4]["zc"] = -np.flip(grid_list[0]["zc"])
+        grid_list[5]["zc"] = -np.flip(grid_list[9]["zc"])
+        
+        grid_list[2]["zc"] = np.r_[half_grid_list[2]["zc"], -np.flip(half_grid_list[2]["zc"])]
+        grid_list[7]["zc"] = np.r_[-np.flip(half_grid_list[3]["zc"]), half_grid_list[3]["zc"]]
+        grid_list[10]["zc"] = np.array([half_grid_list[6]["zc"][0] + np.diff(half_grid_list[6]["zc"])[0]*i for i in range(2*len(half_grid_list[6]["zc"]))])
+        grid_list[11]["zc"] = np.flip(np.array([half_grid_list[7]["zc"][-1] - np.diff(half_grid_list[7]["zc"])[0]*i for i in range(2*len(half_grid_list[7]["zc"]))]))
+
+    def __read_coeffs_half_domain(self, frame):
+        #frame = int(np.genfromtxt("gkeyll_text_output/new_data_flag"))
+        half_mom_data_list = []
+        for isim, sim_name in enumerate(self.sim_names):
+            mom_data = {}
+            #Load moment data
+            for species in ["elc", "ion"]:
+                for mom in ["M0", "M1", "M2"]:
+                    mdata = pg.GData('%s-%s_%s_%d.gkyl'%(sim_name, species,mom,frame))
+                    mom_data[species+mom] = mdata.get_values()
+                #Set derived moment data
+                mom_data[species+"Temp"] =  (self.masses[species]/3) * (mom_data[species+"M2"] - mom_data[species+"M1"]**2 / mom_data[species+"M0"])/mom_data[species+"M0"] / self.eV
+                mom_data[species+"Upar"] =  mom_data[species+"M1"]/mom_data[species+"M0"]
+        
+            # Load the potential
+            mdata = pg.GData('%s-field_%d.gkyl'%(sim_name, frame))
+            mom_data["phi"] = mdata.get_values()
+
+            ncoeffs = mom_data["elcM0"].shape[2]
+        
+            # Append data
+            half_mom_data_list.append(mom_data)
+        
+        # Construct the 12 block data
+        mom_data_list = self.coeff_data_list
+        even_keys = ["elcM0", "elcTemp", "ionM0", "ionTemp", "phi"]
+        odd_keys = ["elcM1", "elcUpar", "ionM1", "ionUpar"]
+        
+        #Unmodified but renumbered blocks
+        mom_data_list[0] = half_mom_data_list[0]
+        mom_data_list[1] = half_mom_data_list[1]
+        mom_data_list[8] = half_mom_data_list[4]
+        mom_data_list[9] = half_mom_data_list[5]
+        
+        # Reflected blocks
+        mom_data_list[3] = {}
+        mom_data_list[6] = {}
+        mom_data_list[4] = {}
+        mom_data_list[5] = {}
+        
+        # Doubled blocks
+        mom_data_list[2] = {}
+        mom_data_list[7] = {}
+        mom_data_list[10] = {}
+        mom_data_list[11] = {}
+        for key in even_keys:
+            mom_data_list[2][key] = np.zeros((half_mom_data_list[2]["ionM0"].shape[0], 2*half_mom_data_list[2]["ionM0"].shape[1],ncoeffs))
+            mom_data_list[7][key] = np.zeros((half_mom_data_list[3]["ionM0"].shape[0], 2*half_mom_data_list[3]["ionM0"].shape[1],ncoeffs))
+            mom_data_list[10][key] = np.zeros((half_mom_data_list[6]["ionM0"].shape[0], 2*half_mom_data_list[6]["ionM0"].shape[1],ncoeffs))
+            mom_data_list[11][key] = np.zeros((half_mom_data_list[7]["ionM0"].shape[0], 2*half_mom_data_list[7]["ionM0"].shape[1],ncoeffs))
+        
+        for key in odd_keys:
+            mom_data_list[2][key] = np.zeros((half_mom_data_list[2]["ionM0"].shape[0], 2*half_mom_data_list[2]["ionM0"].shape[1],ncoeffs))
+            mom_data_list[7][key] = np.zeros((half_mom_data_list[3]["ionM0"].shape[0], 2*half_mom_data_list[3]["ionM0"].shape[1],ncoeffs))
+            mom_data_list[10][key] = np.zeros((half_mom_data_list[6]["ionM0"].shape[0], 2*half_mom_data_list[6]["ionM0"].shape[1],ncoeffs))
+            mom_data_list[11][key] = np.zeros((half_mom_data_list[7]["ionM0"].shape[0], 2*half_mom_data_list[7]["ionM0"].shape[1],ncoeffs))
+        
+        # Flip some and double/reflect some
+        for key in even_keys:
+            #Upper SOL
+            mom_data_list[3][key] = np.flip(mom_data_list[1][key], axis=1).copy()
+            mom_data_list[6][key] = np.flip(mom_data_list[8][key], axis=1).copy()
+            mom_data_list[3][key][:,:,ncoeffs//2:]*=-1
+            mom_data_list[6][key][:,:,ncoeffs//2:]*=-1
+
+            #Upper PF
+            mom_data_list[4][key] = np.flip(mom_data_list[0][key], axis=1).copy()
+            mom_data_list[5][key] = np.flip(mom_data_list[9][key], axis=1).copy()
+            mom_data_list[4][key][:,:,ncoeffs//2:]*=-1
+            mom_data_list[5][key][:,:,ncoeffs//2:]*=-1        
+
+            #Outer Middle
+            mom_data_list[2][key][:, 0:mom_data_list[2][key].shape[1]//2] = half_mom_data_list[2][key] 
+            mom_data_list[2][key][:, mom_data_list[2][key].shape[1]//2:] = np.flip(half_mom_data_list[2][key], axis=1)
+            mom_data_list[2][key][:, mom_data_list[2][key].shape[1]//2:][:,:,ncoeffs//2:]*=-1
+        
+            mom_data_list[10][key][:, 0:mom_data_list[10][key].shape[1]//2] = half_mom_data_list[6][key] 
+            mom_data_list[10][key][:, mom_data_list[10][key].shape[1]//2:] = np.flip(half_mom_data_list[6][key], axis=1)
+            mom_data_list[10][key][:, mom_data_list[10][key].shape[1]//2:][:,:,ncoeffs//2:]*=-1
+        
+            #Inner Middle
+            mom_data_list[7][key][:, 0:mom_data_list[7][key].shape[1]//2] = np.flip(half_mom_data_list[3][key], axis=1) 
+            mom_data_list[7][key][:, mom_data_list[7][key].shape[1]//2:] = half_mom_data_list[3][key]
+            mom_data_list[7][key][:, 0:mom_data_list[7][key].shape[1]//2][:,:,ncoeffs//2:]*=-1
+        
+            mom_data_list[11][key][:, 0:mom_data_list[11][key].shape[1]//2] = np.flip(half_mom_data_list[7][key], axis=1) 
+            mom_data_list[11][key][:, mom_data_list[11][key].shape[1]//2:] = half_mom_data_list[7][key]
+            mom_data_list[11][key][:, 0:mom_data_list[11][key].shape[1]//2][:,:,ncoeffs//2:]*=-1
+        
+        for key in odd_keys:
+            #Upper SOL
+            mom_data_list[3][key] = -np.flip(mom_data_list[1][key], axis=1)
+            mom_data_list[6][key] = -np.flip(mom_data_list[8][key], axis=1)
+            mom_data_list[3][key][:,:,ncoeffs//2:]*=-1
+            mom_data_list[6][key][:,:,ncoeffs//2:]*=-1
+
+            #Upper PF
+            mom_data_list[4][key] = -np.flip(mom_data_list[0][key], axis=1)
+            mom_data_list[5][key] = -np.flip(mom_data_list[9][key], axis=1)
+            mom_data_list[4][key][:,:,ncoeffs//2:]*=-1
+            mom_data_list[5][key][:,:,ncoeffs//2:]*=-1
+        
+            #Outer Middle
+            mom_data_list[2][key][:, 0:mom_data_list[2][key].shape[1]//2] = half_mom_data_list[2][key] 
+            mom_data_list[2][key][:, mom_data_list[2][key].shape[1]//2:] = -np.flip(half_mom_data_list[2][key], axis=1)
+            mom_data_list[2][key][:, mom_data_list[2][key].shape[1]//2:][:,:,ncoeffs//2:]*=-1 
+        
+            mom_data_list[10][key][:, 0:mom_data_list[10][key].shape[1]//2] = half_mom_data_list[6][key] 
+            mom_data_list[10][key][:, mom_data_list[10][key].shape[1]//2:] = -np.flip(half_mom_data_list[6][key], axis=1)
+            mom_data_list[10][key][:, mom_data_list[10][key].shape[1]//2:][:,:,ncoeffs//2:]*=-1
+        
+            #Inner Middle
+            mom_data_list[7][key][:, 0:mom_data_list[7][key].shape[1]//2] = -np.flip(half_mom_data_list[3][key], axis=1) 
+            mom_data_list[7][key][:, mom_data_list[7][key].shape[1]//2:] = half_mom_data_list[3][key]
+            mom_data_list[7][key][:, 0:mom_data_list[7][key].shape[1]//2][:,:,ncoeffs//2:]*=-1
+        
+            mom_data_list[11][key][:, 0:mom_data_list[11][key].shape[1]//2] = -np.flip(half_mom_data_list[7][key], axis=1) 
+            mom_data_list[11][key][:, mom_data_list[11][key].shape[1]//2:] = half_mom_data_list[7][key]
+            mom_data_list[11][key][:, 0:mom_data_list[11][key].shape[1]//2][:,:,ncoeffs//2:]*=-1
+        
+        print("Processed Gkeyll output for frame %d"%frame)
+ 
+
+   
+
     def __read_data_half_domain(self, frame):
         #frame = int(np.genfromtxt("gkeyll_text_output/new_data_flag"))
-        Rlist = []
-        Zlist = []
-        Rilist = []
-        Zilist = []
         half_mom_data_list = []
-        source_half_mom_data_list = []
         for isim, sim_name in enumerate(self.sim_names):
             mom_data = {}
             raw_mom_data = {}
@@ -153,19 +372,6 @@ class gkeyll:
             Ri = Rinterpolator((g0i,g1i))
             Zi = Zinterpolator((g0i, g1i))
         
-            Zavg = (Z.T[:,1:] + Z.T[:,:-1])/2
-            Ravg = (R.T[1:,:] + R.T[:-1,:])/2
-            mom_data["Zavg"] = Zavg
-            mom_data["Ravg"] = Ravg
-        
-            Zperpavg = (Z.T[1:,:] + Z.T[:-1,:])/2
-            mom_data["Zperpavg"] = Zperpavg
-        
-            Rlist.append(R.T)
-            Zlist.append(Z.T)
-        
-            Rilist.append(Ri.T)
-            Zilist.append(Zi.T)
             mom_data["Ri"] = Ri.T
             mom_data["Zi"] = Zi.T
         
@@ -198,14 +404,14 @@ class gkeyll:
                 raw_mom_data[species+"Upar"] =  raw_mom_data[species+"M1"]/raw_mom_data[species+"M0"]
         
                 # Set interpolated moment data
-                #mom_data[species+"Temp"] =  (masses[species]/3) * (mom_data[species+"M2"] - mom_data[species+"M1"]**2 / mom_data[species+"M0"])/mom_data[species+"M0"] / eV
-                #mom_data[species+"Upar"] =  mom_data[species+"M1"]/mom_data[species+"M0"]
+                mom_data[species+"Temp"] =  (self.masses[species]/3) * (mom_data[species+"M2"] - mom_data[species+"M1"]**2 / mom_data[species+"M0"])/mom_data[species+"M0"] / self.eV
+                mom_data[species+"Upar"] =  mom_data[species+"M1"]/mom_data[species+"M0"]
         
                 #Set interpolated data using interpolating function
-                mom_data[species+"M1"] = self.__cellavginterpolate(raw_x,raw_z,x,z,raw_mom_data[species+"M1"])
-                mom_data[species+"M0"] = self.__cellavginterpolate(raw_x,raw_z,x,z,raw_mom_data[species+"M0"])
-                mom_data[species+"Temp"] = self.__cellavginterpolate(raw_x,raw_z,x,z,raw_mom_data[species+"Temp"])
-                mom_data[species+"Upar"] = self.__cellavginterpolate(raw_x,raw_z,x,z,raw_mom_data[species+"Upar"])
+                #mom_data[species+"M1"] = self.__cellavginterpolate(raw_x,raw_z,x,z,raw_mom_data[species+"M1"])
+                #mom_data[species+"M0"] = self.__cellavginterpolate(raw_x,raw_z,x,z,raw_mom_data[species+"M0"])
+                #mom_data[species+"Temp"] = self.__cellavginterpolate(raw_x,raw_z,x,z,raw_mom_data[species+"Temp"])
+                #mom_data[species+"Upar"] = self.__cellavginterpolate(raw_x,raw_z,x,z,raw_mom_data[species+"Upar"])
             
             
             # Calculate sound speed for ion species
@@ -245,7 +451,7 @@ class gkeyll:
             half_mom_data_list.append(mom_data)
         
         # Construct the 12 block data
-        mom_data_list = [None]*12
+        mom_data_list = self.mom_data_list
         even_keys = ["elcM0", "elcTemp", "ionM0", "ionTemp", "phi", "Ri", "gxx", "gzz"]
         odd_keys = ["elcM1", "elcUpar", "ionM1", "ionUpar", "Zi"]
         
@@ -418,7 +624,7 @@ class gkeyll:
         
         
         fig, ax = plt.subplots(nrows=1,ncols=1, figsize = (5,9))
-        markersize = 5.0
+        markersize = 1.0
         
         gnorm=mpl.colors.LogNorm(vmin=gvals.min(), vmax=gvals.max())
         
@@ -434,3 +640,34 @@ class gkeyll:
         ax.set_ylabel('Z [m]')
         ax.axis("tight")
         fig.tight_layout()
+
+    def __find_cell(self, xc, x0):
+        return np.argmin(np.abs(x0-xc))
+
+    def eval_basis(self, coeffs, x, y):
+        basis = np.r_[1/2, np.sqrt(3)*x/2, np.sqrt(3)*y/2, 3*x*y/2]
+        return np.sum(coeffs*basis)
+
+    def interpolate_data(self, ptb):
+        nR = ptb.shape[0]
+        nZ = ptb.shape[1]
+        out = np.zeros((nR, nZ,6))
+        #out = np.zeros((nR, nZ))
+        for i in range(nR):
+            for j in range(nZ):
+                psi, theta, block = ptb[i,j]
+                block = block.astype(int)
+                ip = self.__find_cell(self.grid_list[block]["xc"], psi)
+                it = self.__find_cell(self.grid_list[block]["zc"], theta)
+                pc = self.grid_list[block]["xc"][ip]
+                tc = self.grid_list[block]["zc"][it]
+                xlogical = 2*(psi - pc)/np.diff(self.grid_list[block]["x"])[0]
+                zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
+                #out[i,j] = block,ip,it,xlogical, zlogical, self.eval_basis(self.coeff_data_list[block]["ionM1"][ip,it], xlogical, zlogical)
+                out[i,j] = self.eval_basis(self.coeff_data_list[block]["ionM0"][ip,it], xlogical, zlogical)
+
+        out[out < 0] = 1e12
+
+        return out
+
+
