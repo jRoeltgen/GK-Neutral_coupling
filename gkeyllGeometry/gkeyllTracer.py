@@ -64,19 +64,43 @@ def calc_roots_numba_core(psicoeffs, psi0, Z, Rmid, Zmid, dR, dZ, rmin, rmax):
 
     return nsol, R_out, dRdZ_out
 
+@njit(cache=True)
+def R_psiZ_numba(psi0, Z, psicoeffs, Rgrid, Zgrid, dR, dZ, rmin, rmax):
+    nR = psicoeffs.shape[0]
+    nZ = psicoeffs.shape[1]
+    R_out = np.zeros(4, dtype=np.float64)
+    dRdZ_out = np.zeros(4, dtype=np.float64)
+    sidx = 0
+
+    # --- Find nearest Z index
+    idxtemp = math.floor((Z - Zgrid[0])/dZ)
+    idxtemp = min(idxtemp, nZ-1)
+    idxtemp = max(idxtemp, 0)
+    zidx = idxtemp
+
+    # Prepare midpoints for Z (assuming same size as psicoeffs)
+    Rmid = 0.5 * (Rgrid[:-1] + Rgrid[1:])  # shape (nR,)
+    Zmid = np.full_like(Rmid, 0.5 * (Zgrid[zidx] + Zgrid[zidx + 1]))
+
+    # Call calc_roots_numba_core
+    nsol_array, R_temp, dRdZ_temp = calc_roots_numba_core(
+            psicoeffs[:, zidx], psi0, Z, Rmid, Zmid, dR, dZ, rmin, rmax
+    )
+
+    # Flatten valid solutions into R_out and dRdZ_out
+    for i in range(nR):
+        for k in range(2):  # max 2 solutions per ridx
+            if not np.isnan(R_temp[i, k]):
+                if sidx < 4:
+                    R_out[sidx] = R_temp[i, k]
+                    dRdZ_out[sidx] = dRdZ_temp[i, k]
+                    sidx += 1
+
+    return sidx, R_out, dRdZ_out
+
 class gkeyllTracer:
     def __init__(self, efit, gridspec:dict={}):
         self.efit = efit
-
-        #self.rleft = gridspec["rleft"]
-        #self.rright = gridspec["rright"]
-        #self.rclose = gridspec["rclose"]
-        #self.rmin = gridspec["rmin"]
-        #self.rmax = gridspec["rmax"]
-        #self.ftype = gridspec["ftype"]
-        #self.plate_spec = gridspec["plate_spec"]
-        #self.plate_func_lower = gridspec["plate_func_lower"]
-        #self.plate_func_upper = gridspec["plate_func_upper"]
 
         self.rleft = gridspec.get("rleft", None)
         self.rright = gridspec.get("rright", None)
@@ -98,69 +122,9 @@ class gkeyllTracer:
         self.plate_ctx = { }
         self.contour_ctx = { }
 
-    def __calc_roots(self, psi, psi0, Z, xc, dx):
-        Rmid, Zmid = xc
-        dR, dZ = dx
-
-        nsol, R_out, dRdZ_out = calc_roots_numba_core(
-            psi, psi0, Z, Rmid, Zmid, dR, dZ, self.rmin, self.rmax
-        )
-
-        return {
-            "nsol": nsol,
-            "R": R_out,
-            "dRdZ": dRdZ_out
-        }
-
-
     def R_psiZ(self, psi: float, Z: float):
-        """
-        Vectorized version of R_psiZ using __calc_roots_vectorized.
-        Returns (sidx, R, dRdZ) where sidx = number of valid intersections.
-        """
-        # Output arrays (fixed-size, 4 slots max)
-        R = np.zeros(4, dtype=float)
-        dRdZ = np.zeros(4, dtype=float)
-
-        # --- Find nearest Z index
-        idxtemp = int((Z - self.efit.Zgrid[0]) / self.efit.dZ)
-        zidx = np.clip(idxtemp, 0, self.efit.nZ - 1)
-
-        # --- Prepare arrays for all R grid points
-        nR = self.efit.nR
-        Rgrid = self.efit.Rgrid
-        Zgrid = self.efit.Zgrid
-        psicoeffs = self.efit.psicoeffs
-
-        Rmid = 0.5 * (Rgrid[:-1] + Rgrid[1:])  # shape (nR,)
-        Zmid = np.full_like(Rmid, 0.5 * (Zgrid[zidx] + Zgrid[zidx + 1]))
-
-        dx = np.array([self.efit.dR, self.efit.dZ])
-
-        # --- Call the vectorized root solver
-        sol = self.__calc_roots(
-            psi=psicoeffs[:, zidx],   # shape (nR, 9)
-            psi0=psi,
-            Z=Z,
-            xc=(Rmid, Zmid),
-            dx=dx
-        )
-
-        # --- Extract and flatten valid solutions
-        R_all = sol["R"].ravel()
-        dRdZ_all = sol["dRdZ"].ravel()
-        valid = np.isfinite(R_all) & (R_all > self.rmin) & (R_all < self.rmax)
-
-        R_valid = R_all[valid]
-        dRdZ_valid = dRdZ_all[valid]
-        sidx = min(len(R_valid), 4)
-
-        if sidx > 0:
-            R[:sidx] = R_valid[:sidx]
-            dRdZ[:sidx] = dRdZ_valid[:sidx]
-
+        sidx, R, dRdZ = R_psiZ_numba( psi, Z, self.efit.psicoeffs, self.efit.Rgrid, self.efit.Zgrid, self.efit.dR, self.efit.dZ, self.rmin, self.rmax)
         return sidx, R, dRdZ
-
 
 
     def __tok_plate_psi_func(self, s):
@@ -209,28 +173,6 @@ class gkeyllTracer:
         self.contour_ctx["rclose"] = rclose
         res, err = sci.quad(self.__contour_func, zmin, zmax)
         return res;
-
-    #def integrate_psi_contour(self, psi: float, zmin, zmax, rclose: float, npts: int = 500):
-    #    Zs = np.linspace(zmin, zmax, npts)
-    #    psi_arr = np.full_like(Zs, psi)
-    #    rclose_arr = np.full_like(Zs, rclose)
-
-    #    # Vectorized version of contour_func
-    #    R_vals = np.zeros_like(Zs)
-    #    dRdZ_vals = np.zeros_like(Zs)
-
-    #    for i, Z in enumerate(Zs):
-    #        nR, aR, adRdZ = self.R_psiZ(psi, Z)
-    #        if nR > 0:
-    #            minidx = np.argmin(np.abs(aR - rclose))
-    #            dRdZ_vals[i] = adRdZ[minidx]
-    #            R_vals[i] = math.sqrt(1 + dRdZ_vals[i]**2)
-    #        else:
-    #            R_vals[i] = 0.0
-
-    #    # Integrate numerically using Simpson’s rule
-    #    res = sci.simpson(R_vals, Zs)
-    #    return res
 
     def __ridders_integrate_psi_contour(self, Z, rclose) :
         self.contour_ctx["psi"] = self.arc_ctx['psi']
