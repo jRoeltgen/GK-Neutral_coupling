@@ -99,19 +99,6 @@ class gkeyll_data:
                 polygons.append(Polygon([(r[0,j],z[0,j]),(r[0,j+1],z[0,j+1]),(r[1,j+1],z[1,j+1]),(r[1,j],z[1,j])]))
                 xind.append(-1)
                 yind.append(-1)
-#        for i,v in enumerate(self.connections["lastR"]):
-#            if v<0:
-#                continue
-#            block = "block"+str(i)
-#            cblock = "block"+str(v)
-#            if self.connections["1stR"][v] == i:
-#                idx = 0
-#            if self.connections["lastR"][v] == i:
-#                idx = self.radial_ind_num[v]-1
-#            r = np.vstack([self.blocked_data["R"][block][:,-1],self.blocked_data["R"][cblock][:,idx]])
-#            z = np.vstack([self.blocked_data["Z"][block][:,-1],self.blocked_data["Z"][cblock][:,idx]])
-#            for j in range(self.poloidal_ind_num[i]-1):
-#                polygons.append(Polygon([(r[0,j],z[0,j]),(r[0,j+1],z[0,j+1]),(r[1,j+1],z[1,j+1]),(r[1,j],z[1,j])]))
         lastZ_connections = self.connections["lastZ"]
         for i,v in enumerate(self.connections["1stZ"]):
             if v<0:
@@ -129,20 +116,6 @@ class gkeyll_data:
                 polygons.append(Polygon([(r[0,j],z[0,j]),(r[0,j+1],z[0,j+1]),(r[1,j+1],z[1,j+1]),(r[1,j],z[1,j])]))
                 xind.append(-1)
                 yind.append(-1)                
-#        for i,v in enumerate(lastZ_connections):
-#            if v<0:
-#                continue
-#            block = "block"+str(i)
-#            cblock = "block"+str(v)
-#            if self.connections["1stZ"][v] == i:
-#                idx = 0
-#                print("1stZ",block,cblock)
-#            elif self.connections["lastZ"][v] == i:
-#                idx = self.poloidal_ind_num[v]-1
-#            r = np.vstack([self.blocked_data["R"][block][-1,:],self.blocked_data["R"][cblock][idx,:]])
-#            z = np.vstack([self.blocked_data["Z"][block][-1,:],self.blocked_data["Z"][cblock][idx,:]])               
-#            for j in range(self.radial_ind_num[i]-1):
-#                polygons.append(Polygon([(r[0,j],z[0,j]),(r[0,j+1],z[0,j+1]),(r[1,j+1],z[1,j+1]),(r[1,j],z[1,j])]))
         self.blocked_data["polygons"]["block99999"] = polygons
         self.blocked_data["xind"]["block99999"] = xind
         self.blocked_data["yind"]["block99999"] = yind
