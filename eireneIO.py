@@ -19,7 +19,9 @@ class eirene:
         self.fort44_expanded = {}
         self.fort46 = {}
         self.triangle_mesh = triangles.triangle_mesh(filepath)
-        if(filepath):            
+        if(filepath):
+            if isinstance(filepath, str):
+                filepath = Path(filepath)
             self.read_ft44(filepath / Path("fort.44"))
             self.read_ft46(filepath / Path("fort.46"))
             nx = self.fort44["meta"]["nx"]

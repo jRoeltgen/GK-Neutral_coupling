@@ -9,6 +9,8 @@ class B2:
         self.state = {}
         self.gmtry = {}
         if filepath:
+            if isinstance(filepath, str):
+                filepath = Path(filepath)
             self.read_b2fgmtry(filepath / Path("b2fgmtry"))
         
     def read_b2fstate(self, filename="./b2fstate"):
