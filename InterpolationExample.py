@@ -1,0 +1,39 @@
+import numpy as np
+import gkeyllIO
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+g = gkeyllIO.gkeyll('./test_data/gkeyll_data/', 'step23', True)
+g.read_geometry()
+g.read_data(78)
+g.read_coeffs(78)
+ptb=np.load('gkeyllGeometry/stored_data/gkeyll_b2_coordmapping.npy')
+out=g.interpolate_data(ptb)
+
+import B2IO as b2
+b2dat = b2.B2("./test_data/b2_data/")
+sR = b2dat.gmtry["crx"].mean(axis=2).flatten()
+sZ = b2dat.gmtry["cry"].mean(axis=2).flatten()
+
+#Plot SOLPS interpolated data
+svals=out[:,:,-1].flatten()
+norm=mpl.colors.LogNorm(vmin=svals.min(), vmax=svals.max())
+fig, ax = plt.subplots(nrows=1,ncols=1, figsize = (5,9))
+markersize = 1.0
+snorm=mpl.colors.LogNorm(vmin=svals.min(), vmax=svals.max())
+sim = ax.scatter(sR,sZ,c=svals,cmap='inferno',s=markersize, norm=snorm)
+#sim = ax.scatter(sR,sZ,c=svals,cmap='inferno',s=markersize, vmin=-1e22,vmax=1e22)
+divider = make_axes_locatable(ax)
+cax = divider.append_axes('right', size='5%', pad=0.0)
+cbar = fig.colorbar(sim, cax=cax, orientation='vertical')
+cbar.set_label(r'$n$', rotation=270, labelpad=25, fontsize=16)
+ax.set_title('SOLPS')
+ax.set_xlabel('R [m]')
+ax.set_ylabel('Z [m]')
+ax.axis("tight")
+fig.tight_layout()
+
+#Plot Gkeyll data directly
+g.plot_data()
+
