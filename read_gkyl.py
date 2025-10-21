@@ -27,7 +27,6 @@ class gkeyll_data:
     def read_data(self, filename):
         self.data = pandas.read_csv(filename, sep=r'\s+')
 
-    # Not sure what the format of this would be, so leaving it as a stub
     def read_block_ind(self, filename):
         data = pandas.read_csv(filename, sep=r'\s+')
         if(any(list(map(math.isnan,data["nR"]))) | any(list(map(math.isnan,data["nZ"])))):
