@@ -4,14 +4,15 @@ import triangle_mesh as triangles
 import glob
 import scipy.constants as pyconst
 import math
-import sys
+import platform 
+from pathlib import Path
 # for debugging
 import pdb
 
 class eirene:
     def __init__(self, filepath=None):
-        version = sys.version
-        if not(int(sys.version[0]) >= 3 and int(sys.version[2:4])>=10):
+        version = platform.python_version()
+        if not(int(version[0]) >= 3 and int(version[2:4])>=10):
             print("Python version 3.10 or greater needed for eirene.load_extra_forts()")
             return
         self.fort44 = {"meta":{}, "neut":{}, "wld":{}, "res":{}}
@@ -19,12 +20,12 @@ class eirene:
         self.fort46 = {}
         self.triangle_mesh = triangles.triangle_mesh(filepath)
         if(filepath):            
-            self.read_ft44(filepath+"/fort.44")
-            self.read_ft46(filepath+"/fort.46")
+            self.read_ft44(filepath / Path("fort.44"))
+            self.read_ft46(filepath / Path("fort.46"))
             nx = self.fort44["meta"]["nx"]
             ny = self.fort44["meta"]["ny"]
             ns = self.fort44["meta"]["npls"]
-            self.read_ft31(filepath+"/fort.31", nx+2, ny+2, ns)
+            self.read_ft31(filepath / Path("fort.31"), nx+2, ny+2, ns)
         
     def read_ft44(self, filename):
         print("Ft44Reader: assuming nlwrmsh = 1, nfla = 1.")
@@ -356,14 +357,18 @@ class eirene:
     #    Third index is the source "species"
     #       0 - Electrons; 1 - Atoms; 2 - Molecules; 3 - Bulk Ions
     def load_extra_forts(self, eirene_path, extension="???"):
-        path = eirene_path+"fort."
-        filelist = glob.glob(path + extension)
+        if isinstance(eirene_path, str):
+            eirene_path = Path(eirene_path)
+       # path = eirene_path / Path("fort."+extension)
+        filelist = eirene_path.glob("fort."+extension)
         ntria = len(self.triangle_mesh.cells[:,0])
         self.particle_source = {}
         self.momentum_source = {}
         self.energy_source = {}
         self.extra_source = {}
+        file_read = False
         for current_file in filelist:
+            file_read = True
             current_source = np.zeros(ntria)
             with open(current_file, 'r') as fid:
                 lines_list = fid.read().split('\n')
@@ -376,11 +381,11 @@ class eirene:
             start_line = header_lines
             while x*Ncells < len(lines_list):                
                 current_source = np.array([float(s.split()[2]) for s in lines_list[start_line:start_line+Ncells]])
-                self.__increment_sources(current_source, current_file, lines_list[start_line-6:start_line-4])
+                self.__increment_sources(current_source, current_file.suffix, lines_list[start_line-6:start_line-4])
                 x += 1
                 start_line += add_cells + header_lines + Ncells + 5
                 
-        if(len(filelist) == 0):
+        if not file_read:
             raise Exception("No sources read.")
             
     def write_ft44(self, filename):

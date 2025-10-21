@@ -1,5 +1,5 @@
 import numpy as np
-import pdb
+from pathlib import Path
 
 # Class containing a triangular mesh defined by nodes cells and links,
 #    primarily for Eirene mesh
@@ -7,9 +7,9 @@ class triangle_mesh:
     def __init__(self, filepath=None):
         self.incenter = None
         if (filepath):
-            self.read_ft33(filepath+"/fort.33")
-            self.read_ft34(filepath+"/fort.34")
-            self.read_ft35(filepath+"/fort.35")
+            self.read_ft33(filepath / Path("fort.33"))
+            self.read_ft34(filepath / Path("fort.34"))
+            self.read_ft35(filepath / Path("fort.35"))
 
     def read_ft33(self, filename):
         """

@@ -2,13 +2,14 @@ import numpy as np
 import warnings
 import triangle_mesh as triangles
 import scipy.constants as pyconst
+from pathlib import Path
 
 class B2:
     def __init__(self, filepath=None):
         self.state = {}
         self.gmtry = {}
         if filepath:
-            self.read_b2fgmtry(filepath+"/b2fgmtry")
+            self.read_b2fgmtry(filepath / Path("b2fgmtry"))
         
     def read_b2fstate(self, filename="./b2fstate"):
         """

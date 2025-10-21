@@ -1,10 +1,11 @@
 import filecmp
 import eireneIO
 import numpy as np
+from pathlib import Path
 
 filepath = "./test_data/eirene_data/" 
-edat = eireneIO.eirene(filepath)
-edat.load_extra_forts(filepath)
+edat = eireneIO.eirene(Path(filepath))
+edat.load_extra_forts(Path(filepath))
 edat.write_ft31(filepath+"new_fort.31")
 edat.write_ft44(filepath+"new_fort.44")
 edat.write_ft46(filepath+"new_fort.46")
