@@ -1,14 +1,16 @@
 import numpy as np
 import warnings
-import triangle_mesh as triangles
 import scipy.constants as pyconst
+from pathlib import Path
 
 class B2:
     def __init__(self, filepath=None):
         self.state = {}
         self.gmtry = {}
         if filepath:
-            self.read_b2fgmtry(filepath+"/b2fgmtry")
+            if isinstance(filepath, str):
+                filepath = Path(filepath)
+            self.read_b2fgmtry(filepath / Path("b2fgmtry"))
         
     def read_b2fstate(self, filename="./b2fstate"):
         """
@@ -29,12 +31,14 @@ class B2:
         version = line[7:17]   # MATLAB indexing (8:17) -> Python slice (7:17)
         print(f"read_b2fstate -- file version {version}")
         self.state["version"] = version
+        self.state["git_tag"] = line[17:].replace('\n','')
         
         # Read dimensions nx, ny, ns
         dim = self.__read_field("int",fid, "nx,ny,ns", [3])
         nx, ny, ns = dim
         self.state["dim"] = [nx+2, ny+2, ns]
-        
+        label = self.__read_field("str", fid, "label", [1])
+        self.state["label"] = label.lstrip().replace('\n','')
         fluxdim  = [nx+2, ny+2, 2]
         fluxdimp = [nx+2, ny+2]
         fluxdims = [nx+2, ny+2, 2, ns]
@@ -134,11 +138,16 @@ class B2:
         line = fid.readline()
         version = line[7:17]   # MATLAB (8:17) -> Python slice (7:17)
         fields["version"] = version
+        fields["git_tag"] = line[17:].replace('\n', '')
         print(f"read_b2fgmtry -- file version {version}")
         
         # Read dimensions nx, ny
         dim = self.__read_field("int",fid, "nx,ny", [2])
         nx, ny = dim
+
+        # Read label
+        label = self.__read_field("str", fid, "label", [1])
+        fields["label"] = label.lstrip().replace('\n','')
         
         # Expected array sizes
         qcdim = [nx+2, ny+2]
@@ -209,9 +218,9 @@ class B2:
         self.gmtry = fields
 
         
-    def write_b2fstate(self, filename, label):
+    def write_b2fstate(self, filename, label=None):
         """Write b2fstate file for use by B2.5."""
-
+        
         if not self.state:
             print("No b2fstate is stored. Exiting write_b2fstate.")
         
@@ -223,9 +232,10 @@ class B2:
         # --- Version ---
         version = self.state["version"]
         print(f"write_b2fstate -- file version {version}")
-        VERSION = f"VERSION{version} Written from Python"
+        git_tag = self.state["git_tag"]
+        VERSION = f"VERSION{version}{git_tag}"
         fid.write(VERSION + "\n")
-
+        
         # --- Dimensions ---
         nx = self.state["dim"][0] - 2
         ny = self.state["dim"][1] - 2
@@ -233,7 +243,10 @@ class B2:
         self.__write_ifield(fid, "nx,ny,ns", [nx, ny, ns])
 
         # --- Label ---
-        self.__write_sfield(fid, "label", label)
+        if label:
+            self.__write_sfield(fid, "label", label)
+        else:
+            self.__write_sfield(fid, "label", self.state["label"])
 
         # --- Charges ---
         self.__write_rfield(fid, "zamin", self.state["zamin"])
@@ -300,7 +313,7 @@ class B2:
         fid.close()
 
     
-    def write_b2fgmtry(self, filename, label):
+    def write_b2fgmtry(self, filename, label=None):
         """
         Write b2fgmtry file for use by B2.5.
         
@@ -325,7 +338,8 @@ class B2:
 
         # --- Write version header
         version = gmtry["version"]
-        VERSION = f"VERSION{version} Written from Python"
+        git_tag = gmtry["git_tag"]
+        VERSION = f"VERSION{version}{git_tag}"
         fid.write(f"{VERSION}\n")
 
         # --- Dimensions nx, ny
@@ -334,7 +348,10 @@ class B2:
         self.__write_ifield(fid, "nx,ny", [nx, ny])
         
         # --- Label
-        self.__write_sfield(fid, "label", label)
+        if label:
+            self.__write_sfield(fid, "label", label)
+        else:
+            self.__write_sfield(fid, "label", gmtry["label"])
         
         # --- Symmetry information
         self.__write_ifield(fid, "isymm", gmtry["isymm"])
@@ -424,7 +441,9 @@ class B2:
 
         if(not found):
             raise EOFError(f"EOF reached without finding {fieldname}.")
-            
+
+        if my_type.lower() == "str":
+            return fid.readline()
         # Consistency check
         parts = line.split()
         try:

@@ -60,8 +60,7 @@ def corresponding_polygon(gdat, bdat):
 
     return gkyl_poly_for_b2
 
-#b2dat = b2.B2("./test_data/b2_data/")
-b2dat = b2.B2("../../../solps/")
+b2dat = b2.B2("./test_data/b2_data/")
 gdat = gkyl.gkeyll_data()
 gdat.read_data("./test_data/gkeyll_data/ehl2data.txt")
 gdat.read_block_ind("./test_data/gkeyll_data/cells_ehl2data_copy.txt")
