@@ -914,6 +914,9 @@ class eirene:
                 for k in range(0, nx, cols):
                     for v in values[k:min(k+cols,len(values))]:
                         formatted_number = f"{v: 16.8E}"
+                        if (np.abs(v)<1e-100 or np.abs(v)>1e100) and np.abs(v)>0:
+                            mantissa, exponent = formatted_number.split('E')
+                            formatted_number = " "+mantissa+exponent
                         fid.write(formatted_number)
                     fid.write("\n")
 
