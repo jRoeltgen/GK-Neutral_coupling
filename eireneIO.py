@@ -873,7 +873,20 @@ class eirene:
                         line = f.readline()
                     if not line:
                         raise EOFError("Unexpected end of file while reading field.")
-                    numbers = list(map(float, line.split()))
+                    numbers = []
+                    try:
+                        numbers = list(map(float, line.split()))
+                    except ValueError:
+                        my_list = line.split()
+                        for v in my_list:
+                            if "E" in v:
+                                numbers.append(float(v))
+                            else:
+                                if "+" in v:
+                                    numbers.append(float(v.replace("+","E+")))
+                                else:
+                                    numbers.append(float("E-".join(v.rsplit("-",1))))
+                                
                     values.extend(numbers)
                 field[:, j, i] = values[:nx]
                     
