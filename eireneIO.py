@@ -659,13 +659,12 @@ class eirene:
                         f"for {fieldname} (expected {np.prod(dims)}, found {numin})."
                     )
         # Read extra labels of some wall blocks
-        if num_hentries>0:
-            found = []
-            while len(found)<num_hentries:
-                found.append(fid.readline())
-                num_hentries -= 6
-            if species_type:
-                self.fort44["meta"][species_type] = found
+        found = []
+        while num_hentries>0:
+            found.append(fid.readline())
+            num_hentries -= 6
+        if species_type:
+            self.fort44["meta"][species_type] = found
 
         # --- Read the data block
         count = np.prod(dims)
