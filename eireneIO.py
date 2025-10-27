@@ -970,10 +970,10 @@ class eirene:
         if(current_file[-3]=='1'):
             self.particle_source[species] += current_source
            # self.particle_source[species+"_nescl"] += current_source
-        elif(current_file[-3]=='2'):
+        elif(current_file[-3]=='3'):
             self.momentum_source[species] += current_source
            # self.momentum_source[species+"_nescl"] += current_source
-        elif(current_file[-3]=='3'):
+        elif(current_file[-3]=='2'):
             self.energy_source[species] += current_source
            # self.energy_source[species+"_nescl"] += current_source
         else:
