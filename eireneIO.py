@@ -383,7 +383,7 @@ class eirene:
             start_line = header_lines
             while x*Ncells < len(lines_list):                
                 current_source = np.array([float(s.split()[2]) for s in lines_list[start_line:start_line+Ncells]])
-                self.__increment_sources(current_source, current_file.suffix, lines_list[start_line-6:start_line-4])
+                self.__increment_sources(current_source, current_file.suffix, lines_list[start_line-6:start_line-3])
                 x += 1
                 start_line += add_cells + header_lines + Ncells + 5
                 
@@ -955,7 +955,8 @@ class eirene:
         return last_line_read
 
     def __increment_sources(self, current_source, current_file, info):
-        species = info[-1].strip()
+        species = info[-2].strip()
+        units = info[-1].strip()
         # Add new species to dictionary
         if(species not in self.particle_source.keys()):
             self.particle_source[species] = 0
@@ -969,15 +970,19 @@ class eirene:
         # Add to source 
         if(current_file[-3]=='1'):
             self.particle_source[species] += current_source
-           # self.particle_source[species+"_nescl"] += current_source
+            # self.particle_source[species+"_nescl"] += current_source
+            self.psource_units = units
         elif(current_file[-3]=='3'):
             self.momentum_source[species] += current_source
-           # self.momentum_source[species+"_nescl"] += current_source
+            # self.momentum_source[species+"_nescl"] += current_source
+            self.msource_units = units
         elif(current_file[-3]=='2'):
             self.energy_source[species] += current_source
-           # self.energy_source[species+"_nescl"] += current_source
+            # self.energy_source[species+"_nescl"] += current_source
+            self.esource_units = units
         else:
             self.extra_source[species] += current_source
-           # self.extra_source[species+"_nescl"] += current_source
+            # self.extra_source[species+"_nescl"] += current_source
+            self.extra_source["Units"] = units
             
 
