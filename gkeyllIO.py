@@ -30,6 +30,7 @@ class gkeyll:
         self.charges = {}
         self.charges["elc"] = -self.eV 
         self.charges["ion"] = self.eV
+        self.D = 0.22
 
         #Set half domain options
         self.half_domain = half_domain
@@ -50,6 +51,9 @@ class gkeyll:
         self.coeff_data_list = [None]*12
 
         self.interpolated_data = {}
+        self.interpolated_surfr_data = {}
+        self.interpolated_surfz_data = {}
+
 
 
 
@@ -185,6 +189,35 @@ class gkeyll:
         half_mom_data_list = []
         for isim, sim_name in enumerate(self.sim_names):
             mom_data = {}
+
+            #Load geometry
+            bdata = pg.GData('%s-bmag.gkyl'%sim_name)
+            mom_data["B"] = bdata.get_values()
+            ci = 0
+            for c1 in ["x","y","z"]:
+                for c2 in ["x","y","z"]:
+                    if( c1=="y" and c2 =="x"):
+                        continue
+                    if( c1=="z" and c2 !="z"):
+                        continue
+                    gdata = pg.GData('%s-g_ij.gkyl'%sim_name)
+                    grid,val = pg.data.GInterpModal(gdata,poly_order=1,basis_type='ms').interpolate(ci)
+                    mom_data["g_%s%s"%(c1,c2)] = gdata.get_values()[:,:,4*ci:4*(ci+1)]
+                    ci+=1
+            ci = 0
+            for c1 in ["x","y","z"]:
+                for c2 in ["x","y","z"]:
+                    if( c1=="y" and c2 =="x"):
+                        continue
+                    if( c1=="z" and c2 !="z"):
+                        continue
+                    gdata = pg.GData('%s-gij.gkyl'%sim_name)
+                    mom_data["g%s%s"%(c1,c2)] = gdata.get_values()[:,:,4*ci:4*(ci+1)]
+                    ci+=1
+            
+            jdata = pg.GData('%s-jacobgeo.gkyl'%sim_name)
+            mom_data["J"] = jdata.get_values()
+
             #Load moment data
             for species in ["elc", "ion"]:
                 for mom in ["M0", "M1", "M2"]:
@@ -205,7 +238,7 @@ class gkeyll:
         
         # Construct the 12 block data
         mom_data_list = self.coeff_data_list
-        even_keys = ["elcM0", "ionM0", "elcM2", "ionM2", "phi"]
+        even_keys = ["elcM0", "ionM0", "elcM2", "ionM2", "phi" , "gxx", "gzz"]
         odd_keys = ["elcM1", "ionM1"]
         
         #Unmodified but renumbered blocks
@@ -669,7 +702,7 @@ class gkeyll:
     def interpolate_data(self, ptb):
         nR = ptb.shape[0]
         nZ = ptb.shape[1]
-        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi"]
+        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi", "gxx", "gzz"]
         for k, key in enumerate(keys):
             self.interpolated_data[key] = np.zeros((nR, nZ))
             for i in range(nR):
@@ -685,6 +718,61 @@ class gkeyll:
                     self.interpolated_data[key][i,j] = self.eval_basis(self.coeff_data_list[block][key][ip,it], xlogical, zlogical)
 
 
+
+    def interpolate_surfr_data(self, ptb):
+        nR = ptb.shape[0]
+        nZ = ptb.shape[1]
+        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi", "gxx"]
+        for k, key in enumerate(keys):
+            self.interpolated_surfr_data[key] = np.zeros((nR, nZ))
+            for i in range(nR):
+                for j in range(nZ):
+                    psi, theta, block = ptb[i,j]
+                    block = block.astype(int)
+                    ip = self.__find_cell(self.grid_list[block]["xc"], psi)
+                    it = self.__find_cell(self.grid_list[block]["zc"], theta)
+                    pc = self.grid_list[block]["xc"][ip]
+                    tc = self.grid_list[block]["zc"][it]
+                    xlogical = 2*(psi - pc)/np.diff(self.grid_list[block]["x"])[0]
+                    zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
+                    self.interpolated_surfr_data[key][i,j] = self.eval_basis(self.coeff_data_list[block][key][ip,it], xlogical, zlogical)
+
+        grad_keys = ["elcM0", "ionM0"]
+        for k, key in enumerate(grad_keys):
+            self.interpolated_surfr_data[key+"dx"] = np.zeros((nR, nZ))
+            for i in range(nR):
+                for j in range(nZ):
+                    psi, theta, block = ptb[i,j]
+                    block = block.astype(int)
+                    ip = self.__find_cell(self.grid_list[block]["xc"], psi)
+                    it = self.__find_cell(self.grid_list[block]["zc"], theta)
+                    pc = self.grid_list[block]["xc"][ip]
+                    tc = self.grid_list[block]["zc"][it]
+                    xlogical = 2*(psi - pc)/np.diff(self.grid_list[block]["x"])[0]
+                    zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
+                    self.interpolated_surfr_data[key + "dx"][i,j] = self.eval_basis_grad(self.coeff_data_list[block][key][ip,it], xlogical, zlogical, 0) * 2.0/np.diff(self.mom_data_list[block]["x"])[0]
+
+    def interpolate_surfz_data(self, ptb):
+        nR = ptb.shape[0]
+        nZ = ptb.shape[1]
+        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi", "gxx"]
+        for k, key in enumerate(keys):
+            self.interpolated_surfz_data[key] = np.zeros((nR, nZ))
+            for i in range(nR):
+                for j in range(nZ):
+                    psi, theta, block = ptb[i,j]
+                    block = block.astype(int)
+                    ip = self.__find_cell(self.grid_list[block]["xc"], psi)
+                    it = self.__find_cell(self.grid_list[block]["zc"], theta)
+                    pc = self.grid_list[block]["xc"][ip]
+                    tc = self.grid_list[block]["zc"][it]
+                    xlogical = 2*(psi - pc)/np.diff(self.grid_list[block]["x"])[0]
+                    zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
+                    self.interpolated_surfz_data[key][i,j] = self.eval_basis(self.coeff_data_list[block][key][ip,it], xlogical, zlogical)
+
+
+
+
     def calc_derived_data(self):
         #keys = ["up", "vv", "ww", "te", "ti", "pr", "ua"]
         self.interpolated_data["ua"] = self.interpolated_data["ionM1"]/self.interpolated_data["ionM0"]
@@ -693,6 +781,17 @@ class gkeyll:
         self.interpolated_data["ti"] =  (self.masses["ion"]/3) * (self.interpolated_data["ionM2"] - self.interpolated_data["ionM1"]**2 / self.interpolated_data["ionM0"])/self.interpolated_data["ionM0"] / self.eV
 
         self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"] * self.eV + self.interpolated_data["elcM0"] * self.interpolated_data["te"] * self.eV
+
+    def calc_derived_surfr_data(self):
+        gxxfac = np.sqrt(self.interpolated_surfr_data["gxx"]).copy()
+        gxxfac[self.interpolated_surfr_data["gxx"]<0] = 0.0
+        self.interpolated_surfr_data['fnay'] = self.D*self.interpolated_surfr_data["ionM0dx"]*gxxfac
+
+    def calc_derived_surfz_data(self):
+        self.interpolated_surfz_data['fnax'] = -self.interpolated_surfz_data["ionM1"]/np.sqrt(self.interpolated_data["gzz"])
+
+
+
 
 
 

@@ -9,6 +9,17 @@ g.read_geometry()
 g.read_data(78)
 g.read_coeffs(78)
 ptb=np.load('gkeyllGeometry/stored_data/gkeyll_b2_coordmapping.npy')
+ptb_surfr=np.load('gkeyllGeometry/stored_data/gkeyll_b2_coordmapping_radialfaces.npy')
+ptb_surfz=np.load('gkeyllGeometry/stored_data/gkeyll_b2_coordmapping_parallelfaces.npy')
+
+g.interpolate_data(ptb)
+g.interpolate_surfr_data(ptb_surfr)
+g.interpolate_surfz_data(ptb_surfz)
+
+g.calc_derived_data()
+g.calc_derived_surfr_data()
+g.calc_derived_surfz_data()
+
 g.interpolate_data(ptb)
 g.calc_derived_data()
 
@@ -18,6 +29,7 @@ sR = b2dat.gmtry["crx"].mean(axis=2).flatten()
 sZ = b2dat.gmtry["cry"].mean(axis=2).flatten()
 
 #Plot SOLPS interpolated data
+#svals=g.interpolated_data["ti"].flatten()
 svals=g.interpolated_data["ti"].flatten()
 svals[svals<1000]=1000
 norm=mpl.colors.LogNorm(vmin=svals.min(), vmax=svals.max())
