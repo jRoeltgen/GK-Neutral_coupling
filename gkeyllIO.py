@@ -49,6 +49,8 @@ class gkeyll:
         self.grid_list = [None]*12
         self.coeff_data_list = [None]*12
 
+        self.interpolated_data = {}
+
 
 
 
@@ -189,8 +191,8 @@ class gkeyll:
                     mdata = pg.GData('%s-%s_%s_%d.gkyl'%(sim_name, species,mom,frame))
                     mom_data[species+mom] = mdata.get_values()
                 #Set derived moment data
-                mom_data[species+"Temp"] =  (self.masses[species]/3) * (mom_data[species+"M2"] - mom_data[species+"M1"]**2 / mom_data[species+"M0"])/mom_data[species+"M0"] / self.eV
-                mom_data[species+"Upar"] =  mom_data[species+"M1"]/mom_data[species+"M0"]
+                #mom_data[species+"Temp"] =  (self.masses[species]/3) * (mom_data[species+"M2"] - mom_data[species+"M1"]**2 / mom_data[species+"M0"])/mom_data[species+"M0"] / self.eV
+                #mom_data[species+"Upar"] =  mom_data[species+"M1"]/mom_data[species+"M0"]
         
             # Load the potential
             mdata = pg.GData('%s-field_%d.gkyl'%(sim_name, frame))
@@ -203,8 +205,8 @@ class gkeyll:
         
         # Construct the 12 block data
         mom_data_list = self.coeff_data_list
-        even_keys = ["elcM0", "elcTemp", "ionM0", "ionTemp", "phi"]
-        odd_keys = ["elcM1", "elcUpar", "ionM1", "ionUpar"]
+        even_keys = ["elcM0", "ionM0", "elcM2", "ionM2", "phi"]
+        odd_keys = ["elcM1", "ionM1"]
         
         #Unmodified but renumbered blocks
         mom_data_list[0] = half_mom_data_list[0]
@@ -452,7 +454,7 @@ class gkeyll:
         
         # Construct the 12 block data
         mom_data_list = self.mom_data_list
-        even_keys = ["elcM0", "elcTemp", "ionM0", "ionTemp", "phi", "Ri", "gxx", "gzz"]
+        even_keys = ["elcM0", "elcTemp", "ionM0", "ionTemp", "phi", "Ri", "gxx", "gzz", "elcM2", "ionM2"]
         odd_keys = ["elcM1", "elcUpar", "ionM1", "ionUpar", "Zi"]
         
         #Unmodified but renumbered blocks
@@ -612,23 +614,30 @@ class gkeyll:
     
     
    
-    def plot_data(self):
+    def plot_data(self, field_name):
         """
         Currently just plots density on the R,Z grid,
         but can be improved later to pass field names
         """
         gR = self.Rall
         gZ = self.Zall
-        gvals = self.niall
         points = np.vstack((gR,gZ)).T
+
+
+        gvals = np.array([])
+        bmax=12
+        for i in range(self.bmin,bmax):
+            gvals = np.append(gvals, self.mom_data_list[i][field_name].flatten())
         
         
         fig, ax = plt.subplots(nrows=1,ncols=1, figsize = (5,9))
         markersize = 1.0
         
-        gnorm=mpl.colors.LogNorm(vmin=gvals.min(), vmax=gvals.max())
-        
-        gim = ax.scatter(gR,gZ,c=gvals,cmap='inferno',s=markersize, norm=gnorm)
+        if "M0" in field_name :
+            gnorm=mpl.colors.LogNorm(vmin=gvals.min(), vmax=gvals.max())
+            gim = ax.scatter(gR,gZ,c=gvals,cmap='inferno',s=markersize, norm=gnorm)
+        else:
+            gim = ax.scatter(gR,gZ,c=gvals,cmap='inferno',s=markersize)
         
         
         divider = make_axes_locatable(ax)
@@ -640,6 +649,7 @@ class gkeyll:
         ax.set_ylabel('Z [m]')
         ax.axis("tight")
         fig.tight_layout()
+        return gvals
 
     def __find_cell(self, xc, x0):
         return np.argmin(np.abs(x0-xc))
@@ -648,26 +658,41 @@ class gkeyll:
         basis = np.r_[1/2, np.sqrt(3)*x/2, np.sqrt(3)*y/2, 3*x*y/2]
         return np.sum(coeffs*basis)
 
+    def eval_basis_grad(self, coeffs, x, y, dir):
+        if dir == 0:
+            basis = np.r_[0, np.sqrt(3)/2, 0, 3*y/2]
+        if dir == 1:
+            basis = np.r_[0, 0, np.sqrt(3)/2, 3*x/2]
+        return np.sum(coeffs*basis)
+
+
     def interpolate_data(self, ptb):
         nR = ptb.shape[0]
         nZ = ptb.shape[1]
-        out = np.zeros((nR, nZ,6))
-        #out = np.zeros((nR, nZ))
-        for i in range(nR):
-            for j in range(nZ):
-                psi, theta, block = ptb[i,j]
-                block = block.astype(int)
-                ip = self.__find_cell(self.grid_list[block]["xc"], psi)
-                it = self.__find_cell(self.grid_list[block]["zc"], theta)
-                pc = self.grid_list[block]["xc"][ip]
-                tc = self.grid_list[block]["zc"][it]
-                xlogical = 2*(psi - pc)/np.diff(self.grid_list[block]["x"])[0]
-                zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
-                #out[i,j] = block,ip,it,xlogical, zlogical, self.eval_basis(self.coeff_data_list[block]["ionM1"][ip,it], xlogical, zlogical)
-                out[i,j] = self.eval_basis(self.coeff_data_list[block]["ionM0"][ip,it], xlogical, zlogical)
+        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi"]
+        for k, key in enumerate(keys):
+            self.interpolated_data[key] = np.zeros((nR, nZ))
+            for i in range(nR):
+                for j in range(nZ):
+                    psi, theta, block = ptb[i,j]
+                    block = block.astype(int)
+                    ip = self.__find_cell(self.grid_list[block]["xc"], psi)
+                    it = self.__find_cell(self.grid_list[block]["zc"], theta)
+                    pc = self.grid_list[block]["xc"][ip]
+                    tc = self.grid_list[block]["zc"][it]
+                    xlogical = 2*(psi - pc)/np.diff(self.grid_list[block]["x"])[0]
+                    zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
+                    self.interpolated_data[key][i,j] = self.eval_basis(self.coeff_data_list[block][key][ip,it], xlogical, zlogical)
 
-        out[out < 0] = 1e12
 
-        return out
+    def calc_derived_data(self):
+        #keys = ["up", "vv", "ww", "te", "ti", "pr", "ua"]
+        self.interpolated_data["ua"] = self.interpolated_data["ionM1"]/self.interpolated_data["ionM0"]
+
+        self.interpolated_data["te"] =  (self.masses["elc"]/3) * (self.interpolated_data["elcM2"] - self.interpolated_data["elcM1"]**2 / self.interpolated_data["elcM0"])/self.interpolated_data["elcM0"] / self.eV
+        self.interpolated_data["ti"] =  (self.masses["ion"]/3) * (self.interpolated_data["ionM2"] - self.interpolated_data["ionM1"]**2 / self.interpolated_data["ionM0"])/self.interpolated_data["ionM0"] / self.eV
+
+        self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"] * self.eV + self.interpolated_data["elcM0"] * self.interpolated_data["te"] * self.eV
+
 
 
