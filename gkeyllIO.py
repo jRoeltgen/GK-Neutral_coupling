@@ -17,7 +17,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 class gkeyll:
-    def __init__(self, filepath=None, name=None, half_domain=False):
+    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5):
         # Universal params
         self.mp = 1.67262192e-27
         self.me = 9.1093837e-31
@@ -30,7 +30,7 @@ class gkeyll:
         self.charges = {}
         self.charges["elc"] = -self.eV 
         self.charges["ion"] = self.eV
-        self.D = 0.22
+        self.D = diffusivity
 
         #Set half domain options
         self.half_domain = half_domain
@@ -814,6 +814,22 @@ class gkeyll:
 
     def calc_derived_surfz_data(self, b2dat, edat):
         self.interpolated_surfz_data['fnax'] = -self.interpolated_surfz_data["ionM1"]*-np.sin(edat.fort31["pitch_angle"])*b2dat.gmtry["vol"]/b2dat.gmtry["hx"]
+
+
+    def populate_ft31(self, edat)
+        ft31 = edat.fort31
+        ft31["na"] = self.interpolated_data["na"]
+        ft31["up"] = self.interpolated_data["up"]
+        ft31["vv"] = self.interpolated_data["vv"]
+        ft31["ww"] = self.interpolated_data["ww"]
+        ft31["te"] = self.interpolated_data["te"]
+        ft31["ti"] = self.interpolated_data["ti"]
+        ft31["pr"] = self.interpolated_data["pr"]
+        ft31["ua"] = self.interpolated_data["ua"]
+        ft31["po"] = self.interpolated_data["po"]
+
+        ft31["fnax"] = self.interpolated_surfz_data["fnax"]
+        ft31["fnay"] = self.interpolated_surfr_data["fnay"]
 
 
 
