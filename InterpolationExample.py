@@ -21,21 +21,19 @@ g.interpolate_data(ptb)
 g.interpolate_surfr_data(ptb_surfr)
 g.interpolate_surfz_data(ptb_surfz,)
 
-g.calc_derived_data()
+g.calc_derived_data(b2dat, edat)
 g.calc_derived_surfr_data(b2dat, edat)
 g.calc_derived_surfz_data(b2dat, edat)
-
-g.interpolate_data(ptb)
-g.calc_derived_data()
-
 
 #Plot SOLPS interpolated data
 sR = b2dat.gmtry["crx"].mean(axis=2).flatten()
 sZ = b2dat.gmtry["cry"].mean(axis=2).flatten()
-svals=g.interpolated_surfr_data["fnay"].flatten()
+svals=g.interpolated_data["ww"].flatten()
 #svals[svals<1000]=1000
 #norm=mpl.colors.LogNorm(vmin=svals.min(), vmax=svals.max())
-norm=mpl.colors.SymLogNorm(vmin=svals.min(), vmax=svals.max(), linthresh=1e18)
+norm=mpl.colors.SymLogNorm(vmin=svals.min(), vmax=svals.max(), linthresh=1)
+#norm=mpl.colors.Normalize(vmin=svals.min(), vmax=svals.max())
+#norm=mpl.colors.Normalize(vmin=-500, vmax=500)
 fig, ax = plt.subplots(nrows=1,ncols=1, figsize = (5,9))
 markersize = 3.0
 sim = ax.scatter(sR,sZ,c=svals,cmap='inferno',s=markersize, norm = norm)
@@ -54,7 +52,7 @@ fig.tight_layout()
 #gvals = g.plot_data("ionM1", norm)
 
 efig, eax = plt.subplots(nrows=1,ncols=1, figsize = (5,9))
-evals =edat.fort31["fnay"].flatten()
+evals =edat.fort31["ww"].flatten()
 sim = eax.scatter(sR,sZ,c=evals,cmap='inferno',s=markersize, norm = norm)
 divider = make_axes_locatable(eax)
 cax = divider.append_axes('right', size='5%', pad=0.0)

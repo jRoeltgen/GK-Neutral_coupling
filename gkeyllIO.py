@@ -712,6 +712,24 @@ class gkeyll:
                     zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
                     self.interpolated_data[key][i,j] = self.eval_basis(self.coeff_data_list[block][key][ip,it], xlogical, zlogical)
 
+        mingxx = self.interpolated_data["gxx"][self.interpolated_data["gxx"]>0].min()
+        self.interpolated_data["gxx"][self.interpolated_data["gxx"]<0] = mingxx
+
+        grad_keys = ["elcM0", "ionM0"]
+        for k, key in enumerate(grad_keys):
+            self.interpolated_data[key+"dx"] = np.zeros((nR, nZ))
+            for i in range(nR):
+                for j in range(nZ):
+                    psi, theta, block = ptb[i,j]
+                    block = block.astype(int)
+                    ip = self.__find_cell(self.grid_list[block]["xc"], psi)
+                    it = self.__find_cell(self.grid_list[block]["zc"], theta)
+                    pc = self.grid_list[block]["xc"][ip]
+                    tc = self.grid_list[block]["zc"][it]
+                    xlogical = 2*(psi - pc)/np.diff(self.grid_list[block]["x"])[0]
+                    zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
+                    self.interpolated_data[key + "dx"][i,j] = self.eval_basis_grad(self.coeff_data_list[block][key][ip,it], xlogical, zlogical, 0) * 2.0/np.diff(self.mom_data_list[block]["x"])[0]
+
 
 
     def interpolate_surfr_data(self, ptb):
@@ -775,17 +793,24 @@ class gkeyll:
 
 
 
-    def calc_derived_data(self):
+    def calc_derived_data(self, b2dat, edat):
         #keys = ["up", "vv", "ww", "te", "ti", "pr", "ua"]
-        self.interpolated_data["ua"] = self.interpolated_data["ionM1"]/self.interpolated_data["ionM0"]
+        self.interpolated_data["na"] = self.interpolated_data["ionM0"]
+        self.interpolated_data["po"] = self.interpolated_data["phi"]
+        self.interpolated_data["ua"] = -self.interpolated_data["ionM1"]/self.interpolated_data["ionM0"]
+        self.interpolated_data["up"] = self.interpolated_data["ua"]*-np.sin(edat.fort31["pitch_angle"])
+        self.interpolated_data["ww"] = self.interpolated_data["ua"]*np.cos(edat.fort31["pitch_angle"])
 
         self.interpolated_data["te"] =  (self.masses["elc"]/3) * (self.interpolated_data["elcM2"] - self.interpolated_data["elcM1"]**2 / self.interpolated_data["elcM0"])/self.interpolated_data["elcM0"] / self.eV
         self.interpolated_data["ti"] =  (self.masses["ion"]/3) * (self.interpolated_data["ionM2"] - self.interpolated_data["ionM1"]**2 / self.interpolated_data["ionM0"])/self.interpolated_data["ionM0"] / self.eV
 
         self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"] * self.eV + self.interpolated_data["elcM0"] * self.interpolated_data["te"] * self.eV
 
+        self.interpolated_data['vv'] = self.D*self.interpolated_data["ionM0dx"]*np.sqrt(self.interpolated_data["gxx"])/self.interpolated_data["ionM0"]
+
     def calc_derived_surfr_data(self, b2dat, edat):
         self.interpolated_surfr_data['fnay'] = self.D*self.interpolated_surfr_data["ionM0dx"]*np.sqrt(self.interpolated_surfr_data["gxx"])*b2dat.gmtry["vol"]/b2dat.gmtry["hy"]
+
 
     def calc_derived_surfz_data(self, b2dat, edat):
         self.interpolated_surfz_data['fnax'] = -self.interpolated_surfz_data["ionM1"]*-np.sin(edat.fort31["pitch_angle"])*b2dat.gmtry["vol"]/b2dat.gmtry["hx"]
