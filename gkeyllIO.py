@@ -647,7 +647,7 @@ class gkeyll:
     
     
    
-    def plot_data(self, field_name):
+    def plot_data(self, field_name, norm=None):
         """
         Currently just plots density on the R,Z grid,
         but can be improved later to pass field names
@@ -666,12 +666,7 @@ class gkeyll:
         fig, ax = plt.subplots(nrows=1,ncols=1, figsize = (5,9))
         markersize = 1.0
         
-        if "M0" in field_name :
-            gnorm=mpl.colors.LogNorm(vmin=gvals.min(), vmax=gvals.max())
-            gim = ax.scatter(gR,gZ,c=gvals,cmap='inferno',s=markersize, norm=gnorm)
-        else:
-            gim = ax.scatter(gR,gZ,c=gvals,cmap='inferno',s=markersize)
-        
+        gim = ax.scatter(gR,gZ,c=gvals,cmap='inferno',s=markersize, norm=norm)
         
         divider = make_axes_locatable(ax)
         cax = divider.append_axes('right', size='5%', pad=0.0)
@@ -737,6 +732,10 @@ class gkeyll:
                     zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
                     self.interpolated_surfr_data[key][i,j] = self.eval_basis(self.coeff_data_list[block][key][ip,it], xlogical, zlogical)
 
+
+        mingxx = self.interpolated_surfr_data["gxx"][self.interpolated_surfr_data["gxx"]>0].min()
+        self.interpolated_surfr_data["gxx"][self.interpolated_surfr_data["gxx"]<0] = mingxx
+
         grad_keys = ["elcM0", "ionM0"]
         for k, key in enumerate(grad_keys):
             self.interpolated_surfr_data[key+"dx"] = np.zeros((nR, nZ))
@@ -755,7 +754,7 @@ class gkeyll:
     def interpolate_surfz_data(self, ptb):
         nR = ptb.shape[0]
         nZ = ptb.shape[1]
-        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi", "gxx"]
+        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi", "gxx", "gzz"]
         for k, key in enumerate(keys):
             self.interpolated_surfz_data[key] = np.zeros((nR, nZ))
             for i in range(nR):
@@ -770,6 +769,9 @@ class gkeyll:
                     zlogical = 2*(theta - tc)/np.diff(self.grid_list[block]["z"])[0]
                     self.interpolated_surfz_data[key][i,j] = self.eval_basis(self.coeff_data_list[block][key][ip,it], xlogical, zlogical)
 
+        mingzz = self.interpolated_surfz_data["gzz"][self.interpolated_surfz_data["gzz"]>0].min()
+        self.interpolated_surfz_data["gzz"][self.interpolated_surfz_data["gzz"]<0] = mingzz
+
 
 
 
@@ -782,13 +784,11 @@ class gkeyll:
 
         self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"] * self.eV + self.interpolated_data["elcM0"] * self.interpolated_data["te"] * self.eV
 
-    def calc_derived_surfr_data(self):
-        gxxfac = np.sqrt(self.interpolated_surfr_data["gxx"]).copy()
-        gxxfac[self.interpolated_surfr_data["gxx"]<0] = 0.0
-        self.interpolated_surfr_data['fnay'] = self.D*self.interpolated_surfr_data["ionM0dx"]*gxxfac
+    def calc_derived_surfr_data(self, b2dat, edat):
+        self.interpolated_surfr_data['fnay'] = self.D*self.interpolated_surfr_data["ionM0dx"]*np.sqrt(self.interpolated_surfr_data["gxx"])*b2dat.gmtry["vol"]/b2dat.gmtry["hy"]
 
-    def calc_derived_surfz_data(self):
-        self.interpolated_surfz_data['fnax'] = -self.interpolated_surfz_data["ionM1"]/np.sqrt(self.interpolated_data["gzz"])
+    def calc_derived_surfz_data(self, b2dat, edat):
+        self.interpolated_surfz_data['fnax'] = -self.interpolated_surfz_data["ionM1"]*-np.sin(edat.fort31["pitch_angle"])*b2dat.gmtry["vol"]/b2dat.gmtry["hx"]
 
 
 
