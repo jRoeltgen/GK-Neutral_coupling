@@ -305,13 +305,15 @@ class eirene:
             self.fort31["te"] = self.__read_ft31_field(f, nx, ny)
             # ion temperature
             self.fort31["ti"] = self.__read_ft31_field(f, nx, ny)
-            # pressure
+            # total static pressure
             self.fort31["pr"] = self.__read_ft31_field(f, nx, ny)
             # parallel velocity
             self.fort31["ua"] = self.__read_ft31_field(f, nx, ny, ns)
             # pitch angle
             self.fort31["pitch_angle"] = self.__read_ft31_field(f, nx, ny)
             # Poloidal ion flux (left face)
+            #    energy fluxes and pressure are not directly used by Eirene
+            #    only used in Eirene output
             self.fort31["fnax"] = self.__read_ft31_field(f, nx, ny, ns)
             # Radial ion flux (bottom face)
             self.fort31["fnay"] = self.__read_ft31_field(f, nx, ny, ns)
@@ -323,9 +325,9 @@ class eirene:
             self.fort31["fhex"] = self.__read_ft31_field(f, nx, ny)
             # radial electron heat flux (bottom face)
             self.fort31["fhey"] = self.__read_ft31_field(f, nx, ny)
-            # Total ion drift velocity (diamagnetic)
+            # Poloidal ion drift velocity (ExB+Diamagnetic)
             self.fort31["uadia"] = self.__read_ft31_field(f, nx, ny, ns)
-            # Total ion drift velocity (radial)
+            # Radial ion drift velocity (ExB+Diamagnetic)
             self.fort31["vadia"] = self.__read_ft31_field(f, nx, ny, ns)
             # Potential
             self.fort31["po"] = self.__read_ft31_field(f, nx, ny)
@@ -368,6 +370,7 @@ class eirene:
         self.momentum_source = {}
         self.energy_source = {}
         self.extra_source = {}
+        self.units = {"particle":{}, "momentum":{}, "energy":{}, "extra":{}}
         file_read = False
         for current_file in filelist:
             file_read = True
@@ -971,18 +974,18 @@ class eirene:
         if(current_file[-3]=='1'):
             self.particle_source[species] += current_source
             # self.particle_source[species+"_nescl"] += current_source
-            self.psource_units = units
-        elif(current_file[-3]=='3'):
+            self.units["particle"][species] = units
+        elif(current_file[-3]=='2'):
             self.momentum_source[species] += current_source
             # self.momentum_source[species+"_nescl"] += current_source
-            self.msource_units = units
-        elif(current_file[-3]=='2'):
+            self.units["momentum"][species] = units
+        elif(current_file[-3]=='3'):
             self.energy_source[species] += current_source
             # self.energy_source[species+"_nescl"] += current_source
-            self.esource_units = units
+            self.units["energy"][species] = units
         else:
             self.extra_source[species] += current_source
             # self.extra_source[species+"_nescl"] += current_source
-            self.extra_source["Units"] = units
+            self.units["extra"] = units
             
 
