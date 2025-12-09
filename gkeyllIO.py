@@ -816,7 +816,7 @@ class gkeyll:
         self.interpolated_surfz_data['fnax'] = -self.interpolated_surfz_data["ionM1"]*-np.sin(edat.fort31["pitch_angle"])*b2dat.gmtry["vol"]/b2dat.gmtry["hx"]
 
 
-    def populate_ft31(self, edat)
+    def populate_ft31(self, edat):
         ft31 = edat.fort31
         ft31["na"] = self.interpolated_data["na"]
         ft31["up"] = self.interpolated_data["up"]
