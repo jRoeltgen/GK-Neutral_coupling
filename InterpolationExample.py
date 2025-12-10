@@ -15,7 +15,14 @@ ptb_surfr=np.load('gkeyllGeometry/stored_data/gkeyll_b2_coordmapping_radialfaces
 ptb_surfz=np.load('gkeyllGeometry/stored_data/gkeyll_b2_coordmapping_parallelfaces.npy')
 
 edat = eireneIO.eirene("./eirene_data_step_extra/")
+edat.load_extra_forts("./eirene_data_step_extra/")
+edat.triangle_mesh.calc_incenter()
+eR = edat.triangle_mesh.incenter[:,0]
+eZ = edat.triangle_mesh.incenter[:,1]
+
 b2dat = b2.B2("./b2_data_step/")
+sR = b2dat.gmtry["crx"].mean(axis=2).flatten()
+sZ = b2dat.gmtry["cry"].mean(axis=2).flatten()
 
 g.interpolate_data(ptb)
 g.interpolate_surfr_data(ptb_surfr)
@@ -26,8 +33,6 @@ g.calc_derived_surfr_data(b2dat, edat)
 g.calc_derived_surfz_data(b2dat, edat)
 
 #Plot SOLPS interpolated data
-sR = b2dat.gmtry["crx"].mean(axis=2).flatten()
-sZ = b2dat.gmtry["cry"].mean(axis=2).flatten()
 svals=g.interpolated_data["ww"].flatten()
 #svals[svals<1000]=1000
 #norm=mpl.colors.LogNorm(vmin=svals.min(), vmax=svals.max())
