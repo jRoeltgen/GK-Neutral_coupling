@@ -177,7 +177,7 @@ for i, simName in enumerate(simNames):
             # Temperature calculation (T_source)
             # T = 1/(3*ni) * [E_source * 1e6 - 0.5 * m * ui^2 * ni]
             Ti[ix,iz] = 1/(3*ni[ix,iz])*(eisource[linidx]*1e6 - 0.5*mass_ion * ui[ix,iz]**2*ni[ix,iz])
-            Te[ix,iz] = 2/(3*ne[ix,iz])*(eesource[linidx]*1e6 - 0.5*mass_elc * ue[ix,iz]**2*ne[ix,iz])
+            Te[ix,iz] = 1/(3*ne[ix,iz])*(eesource[linidx]*1e6 - 0.5*mass_elc * ue[ix,iz]**2*ne[ix,iz])
 
 
     # --- START: NEW SMOOTHING AND CLIPPING APPLICATION ---
