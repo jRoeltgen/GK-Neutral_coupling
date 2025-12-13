@@ -143,22 +143,22 @@ for i, simName in enumerate(simNames):
 
 # Step 2: Fill Nodal Gkeyll data by finding closest point from Eirene
 # Changed to use data calculated/loaded from Eirene
-ni_list = []
-Ti_list = []
-ui_list = []
+M0i_list = []
+M2i_list = []
+M1i_list = []
 
-ne_list = []
-Te_list = []
-ue_list = []
+M0e_list = []
+M2e_list = []
+M1e_list = []
 for i, simName in enumerate(simNames):
     nx, nz = Rlist[i].shape
-    ni = np.zeros((nx,nz))
-    ui = np.zeros((nx,nz))
-    Ti = np.zeros((nx,nz))
+    M0i = np.zeros((nx,nz))
+    M1i = np.zeros((nx,nz))
+    M2i = np.zeros((nx,nz))
 
-    ne = np.zeros((nx,nz))
-    ue = np.zeros((nx,nz))
-    Te = np.zeros((nx,nz))
+    M0e = np.zeros((nx,nz))
+    M1e = np.zeros((nx,nz))
+    M2e = np.zeros((nx,nz))
     for ix in range(nx):
         for iz in range(nz):
             lindist = np.sqrt((Rlist[i][ix,iz] - eR)**2 + (Zlist[i][ix,iz] - eZ)**2)
@@ -166,53 +166,69 @@ for i, simName in enumerate(simNames):
             
             # Density calculation (M0 source)
             # ni = PAEL * 1e6/eV
-            ni[ix,iz] = pisource[linidx]/eV*1e6
-            ne[ix,iz] = pesource[linidx]/eV*1e6
+            M0i[ix,iz] = pisource[linidx]/eV*1e6
+            M0e[ix,iz] = pesource[linidx]/eV*1e6
 
             # Velocity calculation (u_parallel source)
-            # ui = MAPL/PAEL * 1e-5 / m_source
-            ui[ix,iz] = misource[linidx]/pisource[linidx]*1e-5/mass_ion
-            ue[ix,iz] = 0.0 # Electron parallel momentum source often set to 0.0 or a simplified value for stability
+            M1i[ix,iz] = misource[linidx]*10/mass_ion/eV
+            M1e[ix,iz] = 0.0 # Electron parallel momentum source often set to 0.0 or a simplified value for stability
 
             # Temperature calculation (T_source)
-            # T = 1/(3*ni) * [E_source * 1e6 - 0.5 * m * ui^2 * ni]
-            Ti[ix,iz] = 1/(3*ni[ix,iz])*(eisource[linidx]*1e6 - 0.5*mass_ion * ui[ix,iz]**2*ni[ix,iz])
-            Te[ix,iz] = 1/(3*ne[ix,iz])*(eesource[linidx]*1e6 - 0.5*mass_elc * ue[ix,iz]**2*ne[ix,iz])
+            M2i[ix,iz] = eisource[linidx]*1e6 
+            M2e[ix,iz] = eesource[linidx]*1e6 
 
 
     # --- START: NEW SMOOTHING AND CLIPPING APPLICATION ---
     # Ion Temperature
-    Ti_clipped = smooth_and_clip(Ti, T_min_J, T_max_J)
+    M2i_clipped = smooth_and_clip(M2i, T_min_J, T_max_J)
     
     # Ion Parallel Velocity
-    ui_clipped = smooth_and_clip(ui, U_min_m_s, U_max_m_s)
+    #M1i_clipped = smooth_and_clip(M1i, U_min_m_s, U_max_m_s)
 
-    # Electron Temperature
-    Te_clipped = smooth_and_clip(Te, T_min_J, T_max_J)
-    
-    # Electron Parallel Velocity (if not already set to 0.0)
-    ue_clipped = smooth_and_clip(ue, U_min_m_s, U_max_m_s)
+    ## Electron Temperature
+    #M2e_clipped = smooth_and_clip(M2e, T_min_J, T_max_J)
+    #
+    ## Electron Parallel Velocity (if not already set to 0.0)
+    #M1e_clipped = smooth_and_clip(M1e, U_min_m_s, U_max_m_s)
     
     # --- END: NEW SMOOTHING AND CLIPPING APPLICATION ---
     
     # Append the clipped/smoothed data
-    ni_list.append(ni)
-    ui_list.append(ui_clipped)
-    Ti_list.append(Ti_clipped)
-    ne_list.append(ne)
-    ue_list.append(ue_clipped)
-    Te_list.append(Te_clipped)
+    M0i_list.append(M0i)
+    M1i_list.append(M1i)
+    M2i_list.append(M2i)
+    M0e_list.append(M0e)
+    M1e_list.append(M1e)
+    M2e_list.append(M2e)
 
 ## Step 3: Write nodal data to text file 
-#for i, simName in enumerate(simNames):
-#    np.savetxt('gkeyll_text_input/'+simName+"-ion_M0source.txt", ni_list[i].flatten())
-#    np.savetxt('gkeyll_text_input/'+simName+"-ion_usource.txt", ui_list[i].flatten())
-#    np.savetxt('gkeyll_text_input/'+simName+"-ion_Tempsource.txt", Ti_list[i].flatten())
-#
-#
-#    np.savetxt('gkeyll_text_input/'+simName+"-elc_M0source.txt", ne_list[i].flatten())
-#    np.savetxt('gkeyll_text_input/'+simName+"-elc_usource.txt", ue_list[i].flatten())
-#    np.savetxt('gkeyll_text_input/'+simName+"-elc_Tempsource.txt", Te_list[i].flatten())
+
+fNames = ['%s_b%d'%(gkeyll_simulation_name,i) for i in range(bmin,bmax)]
+for i, fname in enumerate(fNames):
+    np.savetxt('gkeyll_text_input/'+fname+"-ion_M0source.txt", M0i_list[i].flatten())
+    np.savetxt('gkeyll_text_input/'+fname+"-ion_M1source.txt", M1i_list[i].flatten())
+    np.savetxt('gkeyll_text_input/'+fname+"-ion_M2source.txt", M2i_list[i].flatten())
+
+
+    np.savetxt('gkeyll_text_input/'+fname+"-elc_M0source.txt", M0e_list[i].flatten())
+    np.savetxt('gkeyll_text_input/'+fname+"-elc_M1source.txt", M1e_list[i].flatten())
+    np.savetxt('gkeyll_text_input/'+fname+"-elc_M2source.txt", M2e_list[i].flatten())
 
             
 print("Finished converting text to Gkeyll input")   
+
+
+#Just  for plotting
+Rall = np.array([])
+Zall = np.array([])
+M0iall = np.array([])
+M1iall = np.array([])
+M2iall = np.array([])
+for i in range(8):
+    Rall=np.append(Rall,Rlist[i].flatten())
+    Zall=np.append(Zall,Zlist[i].flatten())
+    M0iall=np.append(M0iall,M0i_list[i].flatten())
+    M1iall=np.append(M1iall,M1i_list[i].flatten())
+    M2iall=np.append(M2iall,M2i_list[i].flatten())
+
+
