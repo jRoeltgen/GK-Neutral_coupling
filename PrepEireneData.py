@@ -5,92 +5,6 @@ import scipy.constants as pyconst
 import numpy as np
 import postgkyl as pg
 
-# --- START: NEW HELPER FUNCTION FOR SMOOTHING AND CLIPPING ---
-def smooth_and_clip(data_array, min_val, max_val):
-    """
-    Clips data_array values outside [min_val, max_val] and replaces them 
-    with the average of their nearest valid neighbors.
-    """
-    clipped = np.copy(data_array)
-    nx, nz = clipped.shape
-    
-    # 1. First Pass: Clip all values and identify invalid points
-    invalid_mask = (clipped < min_val) | (clipped > max_val) | np.isnan(clipped)
-    clipped[clipped < min_val] = min_val  # Simple floor/cap
-    clipped[clipped > max_val] = max_val  # Simple ceiling/cap
-    clipped[np.isnan(clipped)] = min_val  # Treat NaNs as below min_val for initial clipping
-
-    # 2. Second Pass: Inpaint the points that were originally out-of-bounds
-    # We iterate over the array to find points that were marked as invalid
-    # but which now have neighbors whose clipped values we can average.
-    
-    # The while loop continues until no more points are inpainted in a pass,
-    # which is robust for handling clusters of invalid points.
-    inpaint_mask = invalid_mask.copy()
-    num_inpainted_in_pass = 1
-    
-    # max_iterations prevents infinite loops, though should converge quickly
-    max_iterations = nx * nz 
-    iteration = 0
-
-    while np.any(inpaint_mask) and num_inpainted_in_pass > 0 and iteration < max_iterations:
-        num_inpainted_in_pass = 0
-        new_inpaint_mask = inpaint_mask.copy()
-        
-        for ix in range(nx):
-            for iz in range(nz):
-                if inpaint_mask[ix, iz]:
-                    neighbor_values = []
-                    
-                    # Iterate over the 8 neighbors (including corners)
-                    for dix in [-1, 0, 1]:
-                        for diz in [-1, 0, 1]:
-                            if dix == 0 and diz == 0:
-                                continue
-                            
-                            nix, niz = ix + dix, iz + diz
-                            
-                            # Check boundaries
-                            if 0 <= nix < nx and 0 <= niz < nz:
-                                # Only use neighbors that were NOT originally out-of-bounds
-                                # The 'inpaint_mask' still holds the status of being originally invalid
-                                if not invalid_mask[nix, niz]:
-                                    neighbor_values.append(data_array[nix, niz])
-                                elif not new_inpaint_mask[nix, niz]:
-                                    # Use the value that was already corrected in a previous pass
-                                    neighbor_values.append(clipped[nix, niz])
-
-                    if neighbor_values:
-                        # Replace the point with the average of valid neighbors
-                        clipped[ix, iz] = np.mean(neighbor_values)
-                        new_inpaint_mask[ix, iz] = False  # Mark as resolved
-                        num_inpainted_in_pass += 1
-        
-        inpaint_mask = new_inpaint_mask
-        iteration += 1
-
-    # Final Pass: Use the simple cap for any remaining unresolved points
-    # (This happens if the entire array or a whole region was invalid)
-    clipped[inpaint_mask] = np.clip(data_array[inpaint_mask], min_val, max_val)
-    
-    return clipped
-# --- END: NEW HELPER FUNCTION ---
-
-
-# --- START: USER-DEFINED BOUNDARIES ---
-# Conversions: 1 eV ~ 1.602e-19 J; 1 keV ~ 1.602e-16 J
-T_MAX_KEV = 10.0
-T_MIN_KEV = -10.0
-T_max_J = T_MAX_KEV * 1.602e-16
-T_min_J = T_MIN_KEV * 1.602e-16
-
-U_MAX_M_S = 5e5  # Cap velocity at 1000 km/s (10^6 m/s)
-U_MIN_M_S = -5e5      # Set minimum velocity at 1 m/s (to avoid division by zero artifacts)
-U_max_m_s = U_MAX_M_S 
-U_min_m_s = U_MIN_M_S
-# --- END: USER-DEFINED BOUNDARIES ---
-
-
 ion = "D+"
 # read fort.44 and fort.46 from given director ("./")
 # read fort.33, fort.34, and fort.35 from given director ("./")
@@ -164,35 +78,20 @@ for i, simName in enumerate(simNames):
             lindist = np.sqrt((Rlist[i][ix,iz] - eR)**2 + (Zlist[i][ix,iz] - eZ)**2)
             linidx = np.argmin(lindist)
             
-            # Density calculation (M0 source)
+            # M0 source calculation
             # ni = PAEL * 1e6/eV
             M0i[ix,iz] = pisource[linidx]/eV*1e6
             M0e[ix,iz] = pesource[linidx]/eV*1e6
 
-            # Velocity calculation (u_parallel source)
+            # M1 source calculation
             M1i[ix,iz] = misource[linidx]*10/mass_ion/eV
             M1e[ix,iz] = 0.0 # Electron parallel momentum source often set to 0.0 or a simplified value for stability
 
-            # Temperature calculation (T_source)
-            M2i[ix,iz] = eisource[linidx]*1e6 
-            M2e[ix,iz] = eesource[linidx]*1e6 
+            # M2 source Calculation
+            M2i[ix,iz] = eisource[linidx]*1e6/mass_ion*2.0
+            M2e[ix,iz] = eesource[linidx]*1e6/mass_elc*2.0
 
 
-    # --- START: NEW SMOOTHING AND CLIPPING APPLICATION ---
-    # Ion Temperature
-    M2i_clipped = smooth_and_clip(M2i, T_min_J, T_max_J)
-    
-    # Ion Parallel Velocity
-    #M1i_clipped = smooth_and_clip(M1i, U_min_m_s, U_max_m_s)
-
-    ## Electron Temperature
-    #M2e_clipped = smooth_and_clip(M2e, T_min_J, T_max_J)
-    #
-    ## Electron Parallel Velocity (if not already set to 0.0)
-    #M1e_clipped = smooth_and_clip(M1e, U_min_m_s, U_max_m_s)
-    
-    # --- END: NEW SMOOTHING AND CLIPPING APPLICATION ---
-    
     # Append the clipped/smoothed data
     M0i_list.append(M0i)
     M1i_list.append(M1i)
