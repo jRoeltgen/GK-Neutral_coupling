@@ -801,8 +801,8 @@ class gkeyll:
         self.interpolated_data["up"] = self.interpolated_data["ua"]*-np.sin(edat.fort31["pitch_angle"])
         self.interpolated_data["ww"] = self.interpolated_data["ua"]*np.cos(edat.fort31["pitch_angle"])
 
-        self.interpolated_data["te"] =  (self.masses["elc"]/3) * (self.interpolated_data["elcM2"] - self.interpolated_data["elcM1"]**2 / self.interpolated_data["elcM0"])/self.interpolated_data["elcM0"] / self.eV
-        self.interpolated_data["ti"] =  (self.masses["ion"]/3) * (self.interpolated_data["ionM2"] - self.interpolated_data["ionM1"]**2 / self.interpolated_data["ionM0"])/self.interpolated_data["ionM0"] / self.eV
+        self.interpolated_data["te"] =  (self.masses["elc"]/3) * (self.interpolated_data["elcM2"] - self.interpolated_data["elcM1"]**2 / self.interpolated_data["elcM0"])/self.interpolated_data["elcM0"]
+        self.interpolated_data["ti"] =  (self.masses["ion"]/3) * (self.interpolated_data["ionM2"] - self.interpolated_data["ionM1"]**2 / self.interpolated_data["ionM0"])/self.interpolated_data["ionM0"]
 
         self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"] * self.eV + self.interpolated_data["elcM0"] * self.interpolated_data["te"] * self.eV
 

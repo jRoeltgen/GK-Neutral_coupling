@@ -9,14 +9,14 @@ import eireneIO
 
 # First set data input paths
 gkeyll_data_path = './'
-gkeyll_simulation_name = 'step23'
+gkeyll_simulation_name = 'hstep23'
 gkeyll_half_domain=True
-gkeyll_diffusivity=0.22
+gkeyll_diffusivity=0.5
 
-eirene_data_path = "./step_fulldevice_D_only/gkeyll_coupling/"
-b2_data_path = "./step_fulldevice_D_only/baserun/"
+eirene_data_path = "./step_full_device_D_only/gkeyll_coupling/"
+b2_data_path = "./step_full_device_D_only/baserun/"
 
-coordinate_mapping_path = './gkeyllGeometry/stored_data/'
+coordinate_mapping_path = './GK-Neutral_coupling/gkeyllGeometry/stored_data/'
 
 #Set data output paths and get frame number
 gkeyll_text_output_path = './gkeyll_text_output/'
@@ -46,4 +46,4 @@ g.calc_derived_surfz_data(b2dat, edat)
 
 #4th populate and write eirene data
 g.populate_ft31(edat)
-edat.write_fort31(eirene_data_path)
+edat.write_ft31(eirene_data_path+'fort.31_new')

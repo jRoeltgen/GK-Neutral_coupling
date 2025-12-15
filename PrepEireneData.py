@@ -8,7 +8,7 @@ import postgkyl as pg
 ion = "D+"
 # read fort.44 and fort.46 from given director ("./")
 # read fort.33, fort.34, and fort.35 from given director ("./")
-eirene_data_path = "./eirene_data_step_extra/"
+eirene_data_path = "./step_full_device_D_only/gkeyll_coupling/"
 edat = eirene.eirene(eirene_data_path)
 edat.load_extra_forts(eirene_data_path)
 edat.triangle_mesh.calc_incenter()
@@ -29,8 +29,8 @@ eesource = edat.energy_source["ELECTRONS"]
 
 # Step 1: load the Gkeyll grid information
 #     same as process_eirene_output.py's Step 1
-gkeyll_data_path = './test_data/gkeyll_data/'
-gkeyll_simulation_name = 'step23'
+gkeyll_data_path = './'
+gkeyll_simulation_name = 'hstep23'
 bmin = 0
 bmax = 8
 simNames = ['%s_b%d'%(gkeyll_data_path+gkeyll_simulation_name,i) for i in range(bmin,bmax)]
@@ -104,14 +104,14 @@ for i, simName in enumerate(simNames):
 
 fNames = ['%s_b%d'%(gkeyll_simulation_name,i) for i in range(bmin,bmax)]
 for i, fname in enumerate(fNames):
-    np.savetxt('gkeyll_text_input/'+fname+"-ion_M0source.txt", M0i_list[i].flatten())
-    np.savetxt('gkeyll_text_input/'+fname+"-ion_M1source.txt", M1i_list[i].flatten())
-    np.savetxt('gkeyll_text_input/'+fname+"-ion_M2source.txt", M2i_list[i].flatten())
+    np.savetxt('./gkeyll_text_input/'+fname+"-ion_M0source.txt", M0i_list[i].flatten())
+    np.savetxt('./gkeyll_text_input/'+fname+"-ion_M1source.txt", M1i_list[i].flatten())
+    np.savetxt('./gkeyll_text_input/'+fname+"-ion_M2source.txt", M2i_list[i].flatten())
 
 
-    np.savetxt('gkeyll_text_input/'+fname+"-elc_M0source.txt", M0e_list[i].flatten())
-    np.savetxt('gkeyll_text_input/'+fname+"-elc_M1source.txt", M1e_list[i].flatten())
-    np.savetxt('gkeyll_text_input/'+fname+"-elc_M2source.txt", M2e_list[i].flatten())
+    np.savetxt('./gkeyll_text_input/'+fname+"-elc_M0source.txt", M0e_list[i].flatten())
+    np.savetxt('./gkeyll_text_input/'+fname+"-elc_M1source.txt", M1e_list[i].flatten())
+    np.savetxt('./gkeyll_text_input/'+fname+"-elc_M2source.txt", M2e_list[i].flatten())
 
             
 print("Finished converting text to Gkeyll input")   
