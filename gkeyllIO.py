@@ -17,7 +17,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 class gkeyll:
-    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5):
+    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5, extra_species = []):
         # Universal params
         self.mp = 1.67262192e-27
         self.me = 9.1093837e-31
@@ -27,10 +27,14 @@ class gkeyll:
         self.masses = {}
         self.masses["elc"] = self.me
         self.masses["ion"] = 2.014*self.mp
+        self.masses["molecule"] = 4.028*self.mp
         self.charges = {}
         self.charges["elc"] = -self.eV 
         self.charges["ion"] = self.eV
+        self.charges["molecule"] = self.eV
         self.D = diffusivity
+
+        self.species_list = ["elc", "ion"] + extra_species
 
         #Set half domain options
         self.half_domain = half_domain
@@ -219,7 +223,7 @@ class gkeyll:
             mom_data["J"] = jdata.get_values()
 
             #Load moment data
-            for species in ["elc", "ion"]:
+            for species in self.species_list:
                 for mom in ["M0", "M1", "M2"]:
                     mdata = pg.GData('%s-%s_%s_%d.gkyl'%(sim_name, species,mom,frame))
                     mom_data[species+mom] = mdata.get_values()
@@ -238,8 +242,8 @@ class gkeyll:
         
         # Construct the 12 block data
         mom_data_list = self.coeff_data_list
-        even_keys = ["elcM0", "ionM0", "elcM2", "ionM2", "phi" , "gxx", "gzz"]
-        odd_keys = ["elcM1", "ionM1"]
+        even_keys = [self.species_list[j] + ["M0", "M2"][i] for i in range(2) for j in range(len(self.species_list))] + ["phi" , "gxx", "gzz"]
+        odd_keys = [self.species_list[j] + ["M1"][i] for i in range(1) for j in range(len(self.species_list))]
         
         #Unmodified but renumbered blocks
         mom_data_list[0] = half_mom_data_list[0]
@@ -421,7 +425,7 @@ class gkeyll:
                 plate_data = np.genfromtxt(self.sim_dir+"stepplate_data/highres/ipf.txt", delimiter = ",")
         
             #Load moment data
-            for species in ["elc", "ion"]:
+            for species in self.species_list:
                 for mom in ["M0", "M1", "M2"]:
                     mdata = pg.GData('%s-%s_%s_%d.gkyl'%(sim_name, species,mom,frame))
                     raw_mom_data[species+mom] = mdata.get_values()[:,:,0]/2
@@ -477,9 +481,9 @@ class gkeyll:
             mom_data["z"] = z
         
             #Apply a floor to n and T
-            for species in ["elc", "ion"]:
+            for species in self.species_list:
                 mom_data[species+"M0"][mom_data[species+"M0"] < 0] = 1e12
-            for species in ["elc", "ion"]:
+            for species in self.species_list:
                 mom_data[species+"Temp"][mom_data[species+"Temp"] < 0] = 10
         
             # Append data
@@ -489,6 +493,9 @@ class gkeyll:
         mom_data_list = self.mom_data_list
         even_keys = ["elcM0", "elcTemp", "ionM0", "ionTemp", "phi", "Ri", "gxx", "gzz", "elcM2", "ionM2"]
         odd_keys = ["elcM1", "elcUpar", "ionM1", "ionUpar", "Zi"]
+
+        even_keys = [self.species_list[j] + ["M0", "M2", "Temp"][i] for i in range(3) for j in range(len(self.species_list))] + ["phi" , "gxx", "gzz", "Ri"]
+        odd_keys = [self.species_list[j] + ["M1", "Upar"][i] for i in range(2) for j in range(len(self.species_list))] + ["Zi"]
         
         #Unmodified but renumbered blocks
         mom_data_list[0] = half_mom_data_list[0]
@@ -697,7 +704,7 @@ class gkeyll:
     def interpolate_data(self, ptb):
         nR = ptb.shape[0]
         nZ = ptb.shape[1]
-        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi", "gxx", "gzz"]
+        keys = [self.species_list[j] + ["M0", "M1", "M2"][i] for i in range(3) for j in range(len(self.species_list))] + ["phi" , "gxx", "gzz"]
         for k, key in enumerate(keys):
             self.interpolated_data[key] = np.zeros((nR, nZ))
             for i in range(nR):
@@ -715,7 +722,7 @@ class gkeyll:
         mingxx = self.interpolated_data["gxx"][self.interpolated_data["gxx"]>0].min()
         self.interpolated_data["gxx"][self.interpolated_data["gxx"]<0] = mingxx
 
-        grad_keys = ["elcM0", "ionM0"]
+        grad_keys = [self.species_list[j] + ["M0"][i] for i in range(1) for j in range(len(self.species_list))]
         for k, key in enumerate(grad_keys):
             self.interpolated_data[key+"dx"] = np.zeros((nR, nZ))
             for i in range(nR):
@@ -735,7 +742,7 @@ class gkeyll:
     def interpolate_surfr_data(self, ptb):
         nR = ptb.shape[0]
         nZ = ptb.shape[1]
-        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi", "gxx"]
+        keys = [self.species_list[j] + ["M0", "M1", "M2"][i] for i in range(3) for j in range(len(self.species_list))] + ["phi" , "gxx"]
         for k, key in enumerate(keys):
             self.interpolated_surfr_data[key] = np.zeros((nR, nZ))
             for i in range(nR):
@@ -754,7 +761,7 @@ class gkeyll:
         mingxx = self.interpolated_surfr_data["gxx"][self.interpolated_surfr_data["gxx"]>0].min()
         self.interpolated_surfr_data["gxx"][self.interpolated_surfr_data["gxx"]<0] = mingxx
 
-        grad_keys = ["elcM0", "ionM0"]
+        grad_keys = [self.species_list[j] + ["M0"][i] for i in range(1) for j in range(len(self.species_list))]
         for k, key in enumerate(grad_keys):
             self.interpolated_surfr_data[key+"dx"] = np.zeros((nR, nZ))
             for i in range(nR):
@@ -772,7 +779,7 @@ class gkeyll:
     def interpolate_surfz_data(self, ptb):
         nR = ptb.shape[0]
         nZ = ptb.shape[1]
-        keys = ["elcM0", "ionM0", "elcM1", "ionM1", "elcM2", "ionM2", "phi", "gxx", "gzz"]
+        keys = [self.species_list[j] + ["M0", "M1", "M2"][i] for i in range(3) for j in range(len(self.species_list))] + ["phi" , "gxx", "gzz"]
         for k, key in enumerate(keys):
             self.interpolated_surfz_data[key] = np.zeros((nR, nZ))
             for i in range(nR):
@@ -794,12 +801,17 @@ class gkeyll:
 
 
     def calc_derived_data(self, b2dat, edat):
-        #keys = ["up", "vv", "ww", "te", "ti", "pr", "ua"]
-        self.interpolated_data["na"] = self.interpolated_data["ionM0"]
+        multi_species_keys = ["na", "ua", "up", "ww", "vv"]
+        for mk in multi_species_keys:
+            self.interpolated_data[mk] = np.zeros((self.interpolated_data["elcM0"].shape[0], self.interpolated_data["elcM0"].shape[1], len(self.species_list)-1))
+        for i in range(1, len(self.species_list)):
+            self.interpolated_data["na"][:,:,i-1] = self.interpolated_data[self.species_list[i]+"M0"]
+            self.interpolated_data["ua"][:,:,i-1] = -self.interpolated_data[self.species_list[i]+"M1"]/self.interpolated_data[self.species_list[i]+"M0"]
+            self.interpolated_data["up"][:,:,i-1] = self.interpolated_data["ua"][:,:,i-1]*-np.sin(edat.fort31["pitch_angle"])
+            self.interpolated_data["ww"][:,:,i-1] = self.interpolated_data["ua"][:,:,i-1]*np.cos(edat.fort31["pitch_angle"])
+            self.interpolated_data['vv'][:,:,i-1] = self.D*self.interpolated_data[self.species_list[i]+"M0dx"]*np.sqrt(self.interpolated_data["gxx"])/self.interpolated_data[self.species_list[i]+"M0"]
+
         self.interpolated_data["po"] = self.interpolated_data["phi"]
-        self.interpolated_data["ua"] = -self.interpolated_data["ionM1"]/self.interpolated_data["ionM0"]
-        self.interpolated_data["up"] = self.interpolated_data["ua"]*-np.sin(edat.fort31["pitch_angle"])
-        self.interpolated_data["ww"] = self.interpolated_data["ua"]*np.cos(edat.fort31["pitch_angle"])
 
         self.interpolated_data["te"] =  (self.masses["elc"]/3) * (self.interpolated_data["elcM2"] - self.interpolated_data["elcM1"]**2 / self.interpolated_data["elcM0"])/self.interpolated_data["elcM0"]
         self.interpolated_data["ti"] =  (self.masses["ion"]/3) * (self.interpolated_data["ionM2"] - self.interpolated_data["ionM1"]**2 / self.interpolated_data["ionM0"])/self.interpolated_data["ionM0"]
@@ -809,16 +821,26 @@ class gkeyll:
         self.interpolated_data["ti"][self.interpolated_data["ti"] < 0] = 1.0e3*self.eV
         self.interpolated_data["te"][self.interpolated_data["te"] < 0] = 1.0e3*self.eV
 
-        self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"] * self.eV + self.interpolated_data["elcM0"] * self.interpolated_data["te"] * self.eV
+        self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"]  + self.interpolated_data["elcM0"] * self.interpolated_data["te"]
+        if(len(self.species_list)>2):
+            for i in range(2, len(self.species_list)):
+                self.interpolated_data["pr"] = self.interpolated_data[self.species_list[i]+"M0"]*self.interpolated_data["ti"]
 
-        self.interpolated_data['vv'] = self.D*self.interpolated_data["ionM0dx"]*np.sqrt(self.interpolated_data["gxx"])/self.interpolated_data["ionM0"]
 
     def calc_derived_surfr_data(self, b2dat, edat):
-        self.interpolated_surfr_data['fnay'] = self.D*self.interpolated_surfr_data["ionM0dx"]*np.sqrt(self.interpolated_surfr_data["gxx"])*b2dat.gmtry["vol"]/b2dat.gmtry["hy"]
+        multi_species_keys = ["fnay"]
+        for mk in multi_species_keys:
+            self.interpolated_surfr_data[mk] = np.zeros((self.interpolated_surfr_data["elcM0"].shape[0], self.interpolated_surfr_data["elcM0"].shape[1], len(self.species_list)-1))
+        for i in range(1, len(self.species_list)):
+            self.interpolated_surfr_data['fnay'][:,:,i-1] = self.D*self.interpolated_surfr_data[self.species_list[i]+"M0dx"]*np.sqrt(self.interpolated_surfr_data["gxx"])*b2dat.gmtry["vol"]/b2dat.gmtry["hy"]
 
 
     def calc_derived_surfz_data(self, b2dat, edat):
-        self.interpolated_surfz_data['fnax'] = -self.interpolated_surfz_data["ionM1"]*-np.sin(edat.fort31["pitch_angle"])*b2dat.gmtry["vol"]/b2dat.gmtry["hx"]
+        multi_species_keys = ["fnay"]
+        for mk in multi_species_keys:
+            self.interpolated_surfz_data[mk] = np.zeros((self.interpolated_surfz_data["elcM0"].shape[0], self.interpolated_surfz_data["elcM0"].shape[1], len(self.species_list)-1))
+        for i in range(1, len(self.species_list)):
+            self.interpolated_surfz_data['fnax'][:,:,i-1] = -self.interpolated_surfz_data[self.species_list[i]+"M1"]*-np.sin(edat.fort31["pitch_angle"])*b2dat.gmtry["vol"]/b2dat.gmtry["hx"]
 
 
     def populate_ft31(self, edat):
