@@ -117,6 +117,9 @@ class gkeyllTracer:
         self.plate_spec = gridspec.get("plate_spec", None)
         self.plate_func_lower = gridspec.get("plate_func_lower", None)
         self.plate_func_upper = gridspec.get("plate_func_upper", None)
+        self.compression_factor = gridspec.get("compression_factor", None)
+        self.radial_compression_factor = gridspec.get("radial_compression_factor", None)
+        self.width = gridspec.get("width", None)
 
         self.arc_ctx = { }
         self.plate_ctx = { }
@@ -660,6 +663,54 @@ class gkeyllTracer:
     
        
         return ival
+
+    def theta_mapping_func(self, theta):
+
+        if self.ftype in ("GKYL_DN_SOL_OUT_MID", "GKYL_DN_SOL_IN_MID"):
+            self.maplen = self.theta_up - self.theta_lo
+            self.mapzcenter = 0.0
+            self.mapzcut = self.maplen/2.0
+        if self.ftype in ("GKYL_CORE_R"):
+            self.maplen = self.theta_up - self.theta_lo
+            self.mapzcenter = self.theta_lo + self.maplen/2.0
+            self.mapzcut = self.maplen/2.0
+        elif self.ftype in ("GKYL_CORE_L"):
+            self.maplen = self.theta_up - self.theta_lo
+            self.mapzcenter = self.theta_up - self.maplen/2.0
+            self.mapzcut = self.maplen/2.0
+        elif self.ftype in ("GKYL_PF_LO_R", "GKYL_PF_UP_L", "GKYL_DN_SOL_OUT_LO", "GKYL_DN_SOL_IN_UP"):
+            self.maplen = self.theta_up - self.theta_lo
+            self.mapzcenter = self.theta_lo
+            self.mapzcut = self.maplen
+        elif self.ftype in ("GKYL_PF_LO_L", "GKYL_PF_UP_R", "GKYL_DN_SOL_OUT_UP", "GKYL_DN_SOL_IN_LO"):
+            self.maplen = self.theta_up - self.theta_lo
+            self.mapzcenter = self.theta_up
+            self.mapzcut = self.maplen
+
+        if self.compression_factor!=None:
+            uniform_coordinate = theta
+            F = 1.0 / (1.0 - self.compression_factor);
+            A = 1.0/F;
+            zcut = self.mapzcut
+            zshift = uniform_coordinate - self.mapzcenter
+            nonuniform_coordinate = A * (np.sin(np.pi*zshift/zcut)*zcut/np.pi + F*zshift) + self.mapzcenter
+            return nonuniform_coordinate
+        else:
+            return theta
+
+    def psi_mapping_func(self, psi):
+        if self.radial_compression_factor!=None:
+            uniform_coordinate = psi
+            F = 1.0 / (1.0 - self.radial_compression_factor);
+            A = 1.0/F;
+            w = self.width
+            xshift = uniform_coordinate - self.efit.psisep
+            nonuniform_coordinate = A * (-np.sin(np.pi*xshift/w)*w/np.pi + F*xshift) + self.efit.psisep
+            return nonuniform_coordinate
+        else:
+            return psi
+
+
 
         
 

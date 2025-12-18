@@ -22,8 +22,8 @@ class gkeyllGeom:
             gt.set_extent()
             self.blocks.append(gt)
 
-    def write(self, path='./gkeyllGeometry/stored_data/gkeyllGeometry.pkl'):
-        with open(path, "wb") as f:
+    def write(self, path):
+        with open(path+'gkeyllGeometry.pkl', "wb") as f:
             pickle.dump(self, f)
 
     def psitheta(self,R,Z):
@@ -115,5 +115,7 @@ class gkeyllGeom:
 
         arcL = gt.arc_length_func(Z)
         theta = arcL*(2*np.pi/gt.arc_ctx["arcL_tot"]) - np.pi
-        return np.r_[psi,theta, block]
+        Theta = gt.theta_mapping_func(theta)
+        Psi = gt.psi_mapping_func(psi)
+        return np.r_[Psi,Theta, block]
 
