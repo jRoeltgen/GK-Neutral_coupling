@@ -491,9 +491,6 @@ class gkeyll:
         
         # Construct the 12 block data
         mom_data_list = self.mom_data_list
-        even_keys = ["elcM0", "elcTemp", "ionM0", "ionTemp", "phi", "Ri", "gxx", "gzz", "elcM2", "ionM2"]
-        odd_keys = ["elcM1", "elcUpar", "ionM1", "ionUpar", "Zi"]
-
         even_keys = [self.species_list[j] + ["M0", "M2", "Temp"][i] for i in range(3) for j in range(len(self.species_list))] + ["phi" , "gxx", "gzz", "Ri"]
         odd_keys = [self.species_list[j] + ["M1", "Upar"][i] for i in range(2) for j in range(len(self.species_list))] + ["Zi"]
         
@@ -836,7 +833,7 @@ class gkeyll:
 
 
     def calc_derived_surfz_data(self, b2dat, edat):
-        multi_species_keys = ["fnay"]
+        multi_species_keys = ["fnax"]
         for mk in multi_species_keys:
             self.interpolated_surfz_data[mk] = np.zeros((self.interpolated_surfz_data["elcM0"].shape[0], self.interpolated_surfz_data["elcM0"].shape[1], len(self.species_list)-1))
         for i in range(1, len(self.species_list)):
