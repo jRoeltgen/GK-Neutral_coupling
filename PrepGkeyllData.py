@@ -38,7 +38,7 @@ b2dat = b2.B2(b2_data_path)
 #Third do the interpolation
 g.interpolate_data(ptb)
 g.interpolate_surfr_data(ptb_surfr)
-g.interpolate_surfz_data(ptb_surfz,)
+g.interpolate_surfz_data(ptb_surfz)
 
 g.calc_derived_data(b2dat, edat)
 g.calc_derived_surfr_data(b2dat, edat)
@@ -46,4 +46,4 @@ g.calc_derived_surfz_data(b2dat, edat)
 
 #4th populate and write eirene data
 g.populate_ft31(edat)
-edat.write_ft31(eirene_data_path+'fort.31_new')
+edat.write_ft31(eirene_data_path+'fort.31')
