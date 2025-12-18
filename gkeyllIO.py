@@ -804,6 +804,11 @@ class gkeyll:
         self.interpolated_data["te"] =  (self.masses["elc"]/3) * (self.interpolated_data["elcM2"] - self.interpolated_data["elcM1"]**2 / self.interpolated_data["elcM0"])/self.interpolated_data["elcM0"]
         self.interpolated_data["ti"] =  (self.masses["ion"]/3) * (self.interpolated_data["ionM2"] - self.interpolated_data["ionM1"]**2 / self.interpolated_data["ionM0"])/self.interpolated_data["ionM0"]
 
+        # Apply some floors
+        self.interpolated_data["na"][self.interpolated_data["na"] < 0] = 1e12
+        self.interpolated_data["ti"][self.interpolated_data["ti"] < 0] = 1.0e3*self.eV
+        self.interpolated_data["te"][self.interpolated_data["te"] < 0] = 1.0e3*self.eV
+
         self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"] * self.eV + self.interpolated_data["elcM0"] * self.interpolated_data["te"] * self.eV
 
         self.interpolated_data['vv'] = self.D*self.interpolated_data["ionM0dx"]*np.sqrt(self.interpolated_data["gxx"])/self.interpolated_data["ionM0"]
