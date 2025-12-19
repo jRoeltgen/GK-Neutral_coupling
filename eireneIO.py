@@ -359,7 +359,7 @@ class eirene:
     #    Second index is the type of collision
     #       0 - atom-plasma; 1 - molecule-plasma; 2 - test ion-plasma; 3 - photon-plasma
     #    Third index is the source "species"
-    #       0 - Electrons; 1 - Atoms; 2 - Molecules; 3 - Bulk Ions
+    #       0 - Electrons; 1 - Atoms; 2 - Molecules; 3 - Bulk Ions; 4 - Test ions
     def load_extra_forts(self, eirene_path, extension="???"):
         if isinstance(eirene_path, str):
             eirene_path = Path(eirene_path)
@@ -960,30 +960,29 @@ class eirene:
     def __increment_sources(self, current_source, current_file, info):
         species = info[-2].strip()
         units = info[-1].strip()
-        # Add new species to dictionary
-        if(species not in self.particle_source.keys()):
-            self.particle_source[species] = 0
-            self.momentum_source[species] = 0
-            self.energy_source[species] = 0
-            self.extra_source[species] = 0
-           # self.particle_source[species+"_nescl"] = 0
-           # self.momentum_source[species+"_nescl"] = 0
-           # self.energy_source[species+"_nescl"] = 0
-           # self.extra_source[species+"_nescl"] = 0
         # Add to source 
         if(current_file[-3]=='1'):
+            # Add new species to dictionary
+            if(species not in self.particle_source.keys()):
+                self.particle_source[species] = 0
             self.particle_source[species] += current_source
             # self.particle_source[species+"_nescl"] += current_source
             self.units["particle"][species] = units
         elif(current_file[-3]=='2'):
+            if(species not in self.momentum_source.keys()):            
+                self.momentum_source[species] = 0
             self.momentum_source[species] += current_source
             # self.momentum_source[species+"_nescl"] += current_source
             self.units["momentum"][species] = units
         elif(current_file[-3]=='3'):
+            if(species not in self.energy_source.keys()):            
+                self.energy_source[species] = 0
             self.energy_source[species] += current_source
             # self.energy_source[species+"_nescl"] += current_source
             self.units["energy"][species] = units
         else:
+            if(species not in self.extra_source.keys()):
+                self.extra_source[species] = 0
             self.extra_source[species] += current_source
             # self.extra_source[species+"_nescl"] += current_source
             self.units["extra"] = units
