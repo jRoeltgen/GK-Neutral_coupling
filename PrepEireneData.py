@@ -6,7 +6,7 @@ import numpy as np
 import postgkyl as pg
 
 ion = "D+"
-molecules = "MOLECULES"
+molecule = "D2+"
 # read fort.44 and fort.46 from given director ("./")
 # read fort.33, fort.34, and fort.35 from given director ("./")
 eirene_data_path = "./step_full_device_D+D2/gkeyll_w_2D2/"
@@ -26,11 +26,11 @@ pisource = edat.particle_source[ion]
 misource = edat.momentum_source[ion]
 eisource = edat.energy_source[ion]
 pesource = edat.particle_source["ELECTRONS"]
-mesource = edat.momentum_source["ELECTRONS"]
+mesource = 0.0
 eesource = edat.energy_source["ELECTRONS"]
-pmsource = edat.particle_source['MOLECULES']
-mmsource = edat.momentum_source['MOLECULES']
-emsource = edat.energy_source['MOLECULES']
+pmsource = edat.particle_source[molecule]
+mmsource = 0.0
+emsource = edat.energy_source['TEST IONS']
 
 # Step 1: load the Gkeyll grid information
 #     same as process_eirene_output.py's Step 1
@@ -69,6 +69,10 @@ M1i_list = []
 M0e_list = []
 M2e_list = []
 M1e_list = []
+
+M0m_list = []
+M2m_list = []
+M1m_list = []
 for i, simName in enumerate(simNames):
     nx, nz = Rlist[i].shape
     M0i = np.zeros((nx,nz))
@@ -78,6 +82,10 @@ for i, simName in enumerate(simNames):
     M0e = np.zeros((nx,nz))
     M1e = np.zeros((nx,nz))
     M2e = np.zeros((nx,nz))
+
+    M0m = np.zeros((nx,nz))
+    M1m = np.zeros((nx,nz))
+    M2m = np.zeros((nx,nz))
     for ix in range(nx):
         for iz in range(nz):
             lindist = np.sqrt((Rlist[i][ix,iz] - eR)**2 + (Zlist[i][ix,iz] - eZ)**2)
@@ -92,7 +100,7 @@ for i, simName in enumerate(simNames):
             # M1 source calculation
             M1i[ix,iz] = misource[linidx]*10/mass_ion/eV
             M1e[ix,iz] = 0.0 
-            M1m[ix,iz] = 0.0
+            M1m[ix,iz] = 0.0 
 
             # M2 source Calculation
             M2i[ix,iz] = eisource[linidx]*1e6/mass_ion*2.0
