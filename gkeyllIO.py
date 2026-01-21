@@ -846,10 +846,11 @@ class gkeyll:
         ft31["up"] = self.interpolated_data["up"]
         ft31["vv"] = self.interpolated_data["vv"]
         ft31["ww"] = self.interpolated_data["ww"]
+        ft31["ua"] = self.interpolated_data["ua"]
+
         ft31["te"] = self.interpolated_data["te"]
         ft31["ti"] = self.interpolated_data["ti"]
         ft31["pr"] = self.interpolated_data["pr"]
-        ft31["ua"] = self.interpolated_data["ua"]
         ft31["po"] = self.interpolated_data["po"]
 
         ft31["fnax"] = self.interpolated_surfz_data["fnax"]
