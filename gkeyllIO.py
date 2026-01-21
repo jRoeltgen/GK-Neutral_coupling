@@ -818,10 +818,10 @@ class gkeyll:
         self.interpolated_data["ti"][self.interpolated_data["ti"] < 0] = 1.0e3*self.eV
         self.interpolated_data["te"][self.interpolated_data["te"] < 0] = 1.0e3*self.eV
 
-        self.interpolated_data["pr"] = self.interpolated_data["ionM0"] * self.interpolated_data["ti"]  + self.interpolated_data["elcM0"] * self.interpolated_data["te"]
+        self.interpolated_data["pr"] = self.interpolated_data["na"][:,:,0] * self.interpolated_data["ti"]  + self.interpolated_data["elcM0"] * self.interpolated_data["te"]
         if(len(self.species_list)>2):
             for i in range(2, len(self.species_list)):
-                self.interpolated_data["pr"] = self.interpolated_data[self.species_list[i]+"M0"]*self.interpolated_data["ti"]
+                self.interpolated_data["pr"] += self.interpolated_data["na"][:, :, i-1]*self.interpolated_data["ti"]
 
 
     def calc_derived_surfr_data(self, b2dat, edat):
@@ -837,7 +837,7 @@ class gkeyll:
         for mk in multi_species_keys:
             self.interpolated_surfz_data[mk] = np.zeros((self.interpolated_surfz_data["elcM0"].shape[0], self.interpolated_surfz_data["elcM0"].shape[1], len(self.species_list)-1))
         for i in range(1, len(self.species_list)):
-            self.interpolated_surfz_data['fnax'][:,:,i-1] = -self.interpolated_surfz_data[self.species_list[i]+"M1"]*-np.sin(edat.fort31["pitch_angle"])*b2dat.gmtry["vol"]/b2dat.gmtry["hx"]
+            self.interpolated_surfz_data['fnax'][:,:,i-1] = self.interpolated_surfz_data[self.species_list[i]+"M1"]*-np.sin(edat.fort31["pitch_angle"])*b2dat.gmtry["vol"]/b2dat.gmtry["hx"]
 
 
     def populate_ft31(self, edat):
