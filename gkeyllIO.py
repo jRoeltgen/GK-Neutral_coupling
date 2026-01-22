@@ -17,7 +17,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 class gkeyll:
-    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5, extra_species = [], fast_reflection=True, final_cu_rec_coeff = 0.95, final_recyc_coeff_li = 0.99):
+    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5, extra_species = [], fast_reflection=True, final_cu_rec_coeff = 0.95, final_li_recyc_coeff = 0.99):
         # Universal params
         self.mp = 1.67262192e-27
         self.me = 9.1093837e-31
@@ -35,7 +35,7 @@ class gkeyll:
         self.D = diffusivity
         self.fast_reflection = fast_reflection
         self.final_cu_rec_coeff = final_cu_rec_coeff
-        self.final_recyc_coeff_li = final_recyc_coeff_li
+        self.final_li_recyc_coeff = final_li_recyc_coeff
 
         self.species_list = ["elc", "ion"] + extra_species
 
@@ -62,11 +62,11 @@ class gkeyll:
         self.interpolated_surfz_data = {}
 
         if self.fast_reflection:
-            copper_data = np.genfromtxt('reflection_data/DonCu.txt', skip_header=1,delimiter=',')
+            copper_data = np.genfromtxt('GK-Neutral_coupling/reflection_data/DonCu.txt', skip_header=1,delimiter=',')
             copper_data[:,0] = copper_data[:,0]*1000*self.eV # Convert from keV to J
             self.Cuinterpolator = interp1d(copper_data[:,0], copper_data[:,1], bounds_error=False, fill_value='extrapolate')
 
-            lithium_data = np.genfromtxt('reflection_data/DonLi.txt', skip_header=1,delimiter=',')
+            lithium_data = np.genfromtxt('GK-Neutral_coupling/reflection_data/DonLi.txt', skip_header=1,delimiter=',')
             lithium_data[:,0] = lithium_data[:,0]*1000*self.eV # Convert from keV to J
             self.Liinterpolator = interp1d(lithium_data[:,0], lithium_data[:,1], bounds_error=False, fill_value='extrapolate')
 
@@ -845,6 +845,7 @@ class gkeyll:
 
         if self.fast_reflection:
             self.interpolated_surfr_data["tm"] =  (self.masses["molecule"]/3) * (self.interpolated_surfr_data["moleculeM2"] - self.interpolated_surfr_data["moleculeM1"]**2 / self.interpolated_surfr_data["moleculeM0"])/self.interpolated_surfr_data["moleculeM0"]
+            self.interpolated_surfr_data["tm"][self.interpolated_surfr_data["tm"] < 0] = 100*self.eV
 
 
     def calc_derived_surfz_data(self, b2dat, edat):
@@ -857,6 +858,7 @@ class gkeyll:
 
         if self.fast_reflection:
             self.interpolated_surfz_data["tm"] =  (self.masses["molecule"]/3) * (self.interpolated_surfz_data["moleculeM2"] - self.interpolated_surfz_data["moleculeM1"]**2 / self.interpolated_surfz_data["moleculeM0"])/self.interpolated_surfz_data["moleculeM0"]
+            self.interpolated_surfz_data["tm"][self.interpolated_surfz_data["tm"] < 0] = 100*self.eV
 
 
     def populate_ft31(self, edat):
@@ -864,7 +866,7 @@ class gkeyll:
 
         if self.fast_reflection:
             duplicated_volume_keys = ["na", "ua", "up", "ww", "vv"]
-            for key in modified_volume_keys:
+            for key in duplicated_volume_keys:
                 last_col = self.interpolated_data[key][:,:,-1].copy()
                 self.interpolated_data[key] = np.dstack((self.interpolated_data[key], last_col, last_col, last_col))
 
@@ -885,16 +887,16 @@ class gkeyll:
             species3_y = 1.0
             species4_x = 2.0*LiCoeff
             species4_y = 0.0
-            species5_x = self.final_recyc_coeff_li - LiCoeff
+            species5_x = self.final_li_recyc_coeff - LiCoeff
             species5_y = 0.0
             xcoeffs = [species2_x, species3_x, species4_x, species5_x]
             ycoeffs = [species2_y, species3_y, species4_y, species5_y]
 
         if self.fast_reflection:
-            modified_surface_keys = ["fnax", "fnay"]
-            for key in modified_surface_keys:
-                last_col = self.interpolated_data[key][:, :, -1].copy()
-                self.interpolated_data[key] = np.dstack((self.interpolated_data[key], last_col, last_col, last_col))
+            last_col = self.interpolated_surfz_data['fnax'][:, :, -1].copy()
+            self.interpolated_surfz_data['fnax'] = np.dstack((self.interpolated_surfz_data['fnax'], last_col, last_col, last_col))
+            last_col = self.interpolated_surfr_data['fnay'][:, :, -1].copy()
+            self.interpolated_surfr_data['fnay'] = np.dstack((self.interpolated_surfr_data['fnay'], last_col, last_col, last_col))
             for col in range(1, 5):
                 self.interpolated_surfz_data["fnax"][:, :, col] = self.interpolated_surfz_data["fnax"][:, :, col]*xcoeffs[col-1]
                 self.interpolated_surfr_data["fnay"][:, :, col] = self.interpolated_surfr_data["fnay"][:, :, col]*ycoeffs[col-1]
@@ -910,7 +912,6 @@ class gkeyll:
         ft31["ti"] = self.interpolated_data["ti"]
         ft31["pr"] = self.interpolated_data["pr"]
         ft31["po"] = self.interpolated_data["po"]
-
 
 
 
