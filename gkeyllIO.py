@@ -890,10 +890,12 @@ class gkeyll:
             species2_x = 2.0*CuCoeff
             species2_y = 0.0
             species3_x = self.final_cu_rec_coeff - CuCoeff
+            species3_x[species3_x <0] = 0
             species3_y = 1.0
             species4_x = 2.0*LiCoeff
             species4_y = 0.0
             species5_x = self.final_li_recyc_coeff - LiCoeff
+            species5_x[species5_x <0] = 0
             species5_y = 0.0
             xcoeffs = [species2_x, species3_x, species4_x, species5_x]
             ycoeffs = [species2_y, species3_y, species4_y, species5_y]
