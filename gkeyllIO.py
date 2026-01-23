@@ -879,6 +879,12 @@ class gkeyll:
         ft31["ua"] = self.interpolated_data["ua"]
 
         if self.fast_reflection:
+            dummy_keys = ["dummy3D", "uadia", "vadia"]
+            for key in dummy_keys:
+                ft31[key] = np.zeros_like(ft31["na"])
+            ft31["ion_charge"] = np.ones_like(ft31["na"])
+
+        if self.fast_reflection:
             CuCoeff = self.Cuinterpolator(self.interpolated_surfz_data['tm'])
             LiCoeff = self.Liinterpolator(self.interpolated_surfr_data['tm'])
             species2_x = 2.0*CuCoeff
