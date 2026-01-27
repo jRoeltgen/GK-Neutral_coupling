@@ -865,7 +865,11 @@ class gkeyll:
         ft31 = edat.fort31
 
         if self.fast_reflection:
-            duplicated_volume_keys = ["na", "ua", "up", "ww", "vv"]
+            zero_volume_keys = ["na"]
+            for key in zero_volume_keys:
+                last_col = np.zeros_like(self.interpolated_data[key][:,:,-1])
+                self.interpolated_data[key] = np.dstack((self.interpolated_data[key], last_col, last_col, last_col))
+            duplicated_volume_keys = ["ua", "up", "ww", "vv"]
             for key in duplicated_volume_keys:
                 last_col = self.interpolated_data[key][:,:,-1].copy()
                 self.interpolated_data[key] = np.dstack((self.interpolated_data[key], last_col, last_col, last_col))
