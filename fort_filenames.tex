@@ -1,0 +1,91 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{longtable}
+
+\title{Eirene fort.??? filenames}
+\author{Jonathan Roeltgen}
+\date{January 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{File extensions for Eirene sources}
+All files are of the form fort.???. The first ? specifies the type of source (particle, momentum, or energy). The second ? specifies the type of collision (atom-plasma, molecule-plasma, test ion-plasma, photon-plasma, plasma-plasma/primary source). The third ? specifies the species type it is a source for.
+
+% Note: It may be necessary to compile the document several times to get a multi-page table to line up properly
+\begin{longtable}{|l|l|l|l|l|l|}
+\hline
+Ext. & Tally \# & Name   & M type   & Coll. type & Spec. type \\ \hline
+\endfirsthead
+%
+\multicolumn{6}{c}%
+{{\bfseries Table \thetable\ continued from previous page}} \\
+\hline
+Ext. & Tally \# & Name   & M type   & Coll. type & Spec. type \\ \hline
+\endhead
+%
+100  & 9        & PAEL   & Particle & Atom-Pl    & Electrons  \\ \hline
+101  & 10       & PAAT   & Particle & Atom-Pl    & Atoms      \\ \hline
+102  & 11       & PAML   & Particle & Atom-Pl    & Molecules  \\ \hline
+103  & 12       & PAIO   & Particle & Atom-Pl    & Test Ions  \\ \hline
+104  & 13       & PAPHT  & Particle & Atom-Pl    & Photons    \\ \hline
+105  & 14       & PAPL   & Particle & Atom-Pl    & Bulk Ions  \\ \hline
+110  & 15       & PMEL   & Particle & Mol-Pl     & Electrons  \\ \hline
+111  & 16       & PMAT   & Particle & Mol-Pl     & Atoms      \\ \hline
+112  & 17       & PMML   & Particle & Mol-Pl     & Molecules  \\ \hline
+113  & 18       & PMIO   & Particle & Mol-Pl     & Test Ions  \\ \hline
+114  & 19       & PMPHT  & Particle & Mol-Pl     & Photons    \\ \hline
+115  & 20       & PMPL   & Particle & Mol-Pl     & Bulk Ions  \\ \hline
+120  & 21       & PIEL   & Particle & TestIon-Pl & Electrons  \\ \hline
+121  & 22       & PIAT   & Particle & TestIon-Pl & Atoms      \\ \hline
+122  & 23       & PIML   & Particle & TestIon-Pl & Molecules  \\ \hline
+123  & 24       & PIIO   & Particle & TestIon-Pl & Test Ions  \\ \hline
+124  & 25       & PIPHT  & Particle & TestIon-Pl & Photons    \\ \hline
+125  & 26       & PIPL   & Particle & TestIon-Pl & Bulk Ions  \\ \hline
+130  & 27       & PPHEL  & Particle & Photon-Pl  & Electrons  \\ \hline
+131  & 28       & PPHAT  & Particle & Photon-Pl  & Atoms      \\ \hline
+132  & 29       & PPHML  & Particle & Photon-Pl  & Molecules  \\ \hline
+133  & 30       & PPHIO  & Particle & Photon-Pl  & Test Ions  \\ \hline
+134  & 31       & PPHPHT & Particle & Photon-Pl  & Photons    \\ \hline
+135  & 32       & PPHPL  & Particle & Photon-Pl  & Bulk Ions  \\ \hline
+140  & 75       & PPAT   & Particle & Pl-Pl/prim & Atoms      \\ \hline
+141  & 76       & PPML   & Particle & Pl-Pl/prim & Molecules  \\ \hline
+142  & 77       & PPIO   & Particle & Pl-Pl/prim & Test Ions  \\ \hline
+143  & 78       & PPPHT  & Particle & Pl-Pl/prim & Photons    \\ \hline
+144  & 79       & PPPL   & Particle & Pl-Pl/prim & Bulk Ions  \\ \hline
+203  & 97       & MAPL   & $\|$ Momt. & Atom-Pl    & Bulk Ions  \\ \hline
+213  & 98       & MMPL   & $\|$ Momt. & Mol-Pl     & Bulk Ions  \\ \hline
+223  & 99       & MIPL   & $\|$ Momt. & TestIon-Pl & Bulk Ions  \\ \hline
+233  & 100      & MPHPL  & $\|$ Momt. & Photon-Pl  & Bulk Ions  \\ \hline
+300  & 33       & EAEL   & Energy   & Atom-Pl    & Electrons  \\ \hline
+301  & 34       & EAAT   & Energy   & Atom-Pl    & Atoms      \\ \hline
+302  & 35       & EAML   & Energy   & Atom-Pl    & Molecules  \\ \hline
+303  & 36       & EAIO   & Energy   & Atom-Pl    & Test Ions  \\ \hline
+304  & 37       & EAPHT  & Energy   & Atom-Pl    & Photons    \\ \hline
+305  & 38       & EAPL   & Energy   & Atom-Pl    & Bulk Ions  \\ \hline
+310  & 39       & EMEL   & Energy   & Mol-Pl     & Electrons  \\ \hline
+311  & 40       & EMAT   & Energy   & Mol-Pl     & Atoms      \\ \hline
+312  & 41       & EMML   & Energy   & Mol-Pl     & Molecules  \\ \hline
+313  & 42       & EMIO   & Energy   & Mol-Pl     & Test Ions  \\ \hline
+314  & 43       & EMPHT  & Energy   & Mol-Pl     & Photons    \\ \hline
+315  & 44       & EMPL   & Energy   & Mol-Pl     & Bulk Ions  \\ \hline
+320  & 45       & EIEL   & Energy   & TestIon-Pl & Electrons  \\ \hline
+321  & 46       & EIAT   & Energy   & TestIon-Pl & Atoms      \\ \hline
+322  & 47       & EIML   & Energy   & TestIon-Pl & Molecules  \\ \hline
+323  & 48       & EIIO   & Energy   & TestIon-Pl & Test Ions  \\ \hline
+324  & 49       & EIPHT  & Energy   & TestIon-Pl & Photons    \\ \hline
+325  & 50       & EIPL   & Energy   & TestIon-Pl & Bulk Ions  \\ \hline
+330  & 51       & EPHEL  & Energy   & Photon-Pl  & Electrons  \\ \hline
+331  & 52       & EPHAT  & Energy   & Photon-Pl  & Atoms      \\ \hline
+332  & 53       & EPHML  & Energy   & Photon-Pl  & Molecules  \\ \hline
+333  & 54       & EPHIO  & Energy   & Photon-Pl  & Test Ions  \\ \hline
+334  & 55       & EPHPHT & Energy   & Photon-Pl  & Photons    \\ \hline
+335  & 56       & EPHPL  & Energy   & Photon-Pl  & Bulk Ions  \\ \hline
+340  & 80       & EPAT   & Energy   & Pl-Pl/prim & Atoms      \\ \hline
+341  & 81       & EPML   & Energy   & Pl-Pl/prim & Molecules  \\ \hline
+342  & 82       & EPIO   & Energy   & Pl-Pl/prim & Test Ions  \\ \hline
+343  & 83       & EPPHT  & Energy   & Pl-Pl/prim & Photons    \\ \hline
+344  & 84       & EPPL   & Energy   & Pl-Pl/prim & Bulk Ions  \\ \hline
+\end{longtable}
+\end{document}
