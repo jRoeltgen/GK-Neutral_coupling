@@ -203,23 +203,23 @@ def test_electrons_get_bulk_ion_vr():
     sa = make_assigner(
         vol_rec={
             "D+": {21},
-            "T+": {22},
         }
     )
 
     ingest_series(sa, [
         ("particle", "atom-plasma", "ELECTRONS", "e-", np.zeros((3,))),
-        ("particle", "atom-plasma", "ELECTRONS", "e-", np.ones((3,))),
-        ("particle", "atom-plasma", "ELECTRONS", "e-", np.ones((3,))),
-        ("particle", "atom-plasma", "bulk_ions", "D+", np.ones((3,))),
+        ("particle", "atom-plasma", "ELECTRONS", "e-", 1.1*np.ones((3,))),
+        ("particle", "atom-plasma", "ELECTRONS", "e-", 1.2*np.ones((3,))),
+        ("particle", "atom-plasma", "bulk_ions", "D+", 1.3*np.ones((3,))),
+        ("particle", "plasma-plasma", "bulk_ions", "D+", 1.4*np.ones((3,))),
         ("particle", "atom-plasma", "bulk_ions", "D+", np.zeros((3,))),
         ("particle", "atom-plasma", "bulk_ions", "D+", np.full((3,),2.0)),
     ])
 
     total = sa.sum_over_collisions()
-    #pdb.set_trace()
+
     # electrons should receive D+ VR
-    assert np.allclose(total["particle"]["e-"]["SUM"], np.full((3,),3.0))
+    assert np.allclose(total["particle"]["e-"]["SUM"], np.full((3,),2.6))
 
 def test_SUM_excludes_plasma_plasma():
     sa = make_assigner()
@@ -239,13 +239,18 @@ def test_SUM_excludes_plasma_plasma():
     assert np.allclose(total["particle"]["e-"]["SUM"], np.ones(3,))
 
 def test_Te_Ti_scaling_energy():
-    sa = make_assigner()
+    sa = make_assigner(
+        vol_rec={
+            "D+": {21},
+        }
+    )
 
     ingest_series(sa, [
         ("energy", "atom-plasma", "ELECTRONS", "e-", np.zeros((3,))),
         ("energy", "atom-plasma", "ELECTRONS", "e-", np.ones((3,))),
         ("energy", "atom-plasma", "ELECTRONS", "e-", np.ones((3,))),
-        ("energy", "atom-plasma", "bulk_ions", "D+", np.ones((3,))),
+        ("energy", "atom-plasma", "bulk_ions", "D+", 3.3*np.ones((3,))),
+        ("energy", "plasma-plasma", "bulk_ions", "D+", np.ones((3,))),
     ])
 
     Te = 10.0
@@ -275,3 +280,199 @@ def test_sum_over_collisions_does_not_mix_moments():
 
     assert p_sum == pytest.approx(1.0)
     assert e_sum == pytest.approx(10.0)
+
+# -------------------------
+# Electron VR helpers
+# -------------------------
+def test_apply_electron_bulk_vr_particle():
+    sa = make_assigner(vol_rec={"D+": {21}})
+
+    # minimal sources
+    sa.sources = {
+        "particle": {
+            "atom-plasma": {
+                "D+": {21: np.ones(3)}
+            },
+            "plasma-plasma":{
+                "e-": {"SUM": np.zeros(3)},
+                "D+": {21: np.ones(3)}
+            }
+        }
+    }
+    sa.particle_class = {
+        "particle": {"atom-plasma": {"D+": "bulk_ions"},
+                     "plasma-plasma": {"e-": "ELECTRONS", "D+": "bulk_ions"}}
+    }
+
+    warned = set()
+    total = {"particle": {"e-": {"SUM": np.zeros(3)}}}
+
+    sa._apply_electron_bulk_vr(
+        mom="particle",
+        coll_dict=["plasma-plasma"],
+        total=total,
+        vol_attr=sa.volume_recombination,
+        Te=1.0,
+        Ti=1.0,
+        warned_species_strata=warned,
+        key_warn=("e-", "SUM"),
+        suppress_warning=False
+    )
+
+    sa._apply_electron_bulk_vr(
+        mom="particle",
+        coll_dict=["atom-plasma"],
+        total=total,
+        vol_attr=sa.volume_recombination,
+        Te=1.0,
+        Ti=1.0,
+        warned_species_strata=warned,
+        key_warn=("e-", "SUM"),
+        suppress_warning=False
+    )
+
+    # Check that electron SUM got D+ contribution
+    assert np.allclose(total["particle"]["e-"]["SUM"], np.ones(3))
+
+def test_apply_electron_bulk_vr_energy_scaling():
+    sa = make_assigner(vol_rec={"D+": {21}})
+
+    sa.sources = {
+        "energy": {
+            "atom-plasma": {
+                "D+": {21: 1.1*np.ones(3)}
+            },
+            "plasma-plasma":{
+                "e-": {"SUM": np.zeros(3)},
+                "D+": {21: np.ones(3)}
+            }
+        }
+    }
+    sa.particle_class = {
+        "energy": {"atom-plasma": {"D+": "bulk_ions"},
+                   "plasma-plasma": {"e-": "ELECTRONS", "D+": "bulk_ions"}}
+    }
+
+    warned = set()
+    total = {"energy": {"e-": {"SUM": np.zeros(3)}}}
+
+    Te, Ti = 10.0, 2.0  # factor = 5
+
+    sa._apply_electron_bulk_vr(
+        mom="energy",
+        coll_dict=["plasma-plasma"],
+        total=total,
+        vol_attr=sa.volume_recombination,
+        Te=Te,
+        Ti=Ti,
+        warned_species_strata=warned,
+        key_warn=("e-", "SUM"),
+        suppress_warning=False
+    )
+
+    # Electron SUM should include D+ VR scaled by Te/Ti
+    assert np.allclose(total["energy"]["e-"]["SUM"], 5*np.ones(3))
+
+# -------------------------
+# Normal species VR helpers
+# -------------------------
+def test_apply_normal_species_vr_only_sum():
+    sa = make_assigner(vol_rec={"D+": {21}})
+
+    sa.sources = {
+        "particle": {
+            "atom-plasma": {
+                "D+": {21: np.ones(3)}
+            }
+        }
+    }
+    sa.particle_class = {
+        "particle": {"atom-plasma": {"D+": "bulk_ions"}}
+    }
+
+    total = {"particle": {"D+": {"SUM": np.zeros(3), 21: np.ones(3)}}}
+    warned = set()
+
+    sa._apply_normal_species_vr(
+        mom="particle",
+        coll_dict=["atom-plasma"],
+        species="D+",
+        total=total,
+        vol_attr=sa.volume_recombination,
+        warned_species_strata=warned,
+        key_warn=("D+", "SUM"),
+        suppress_warning=False
+    )
+
+    # SUM should include VR from stratum 21
+    assert np.allclose(total["particle"]["D+"]["SUM"], np.ones(3))
+
+    # non-SUM stratum unchanged
+    assert np.allclose(total["particle"]["D+"][21], np.ones(3))
+
+def test_apply_normal_species_vr_plasma_plasma_excluded():
+    sa = make_assigner(vol_rec={"D+": {21}})
+
+    sa.sources = {
+        "particle": {
+            "plasma-plasma": {
+                "D+": {21: np.ones(3)}
+            }
+        }
+    }
+    sa.particle_class = {
+        "particle": {"plasma-plasma": {"D+": "bulk_ions"}}
+    }
+
+    total = {"particle": {"D+": {"SUM": np.zeros(3), 21: np.ones(3)}}}
+    warned = set()
+
+    sa._apply_normal_species_vr(
+        mom="particle",
+        coll_dict=["plasma-plasma"],
+        species="D+",
+        total=total,
+        vol_attr=sa.volume_recombination,
+        warned_species_strata=warned,
+        key_warn=("D+", "SUM"),
+        suppress_warning=False
+    )
+
+    # SUM should NOT include plasma-plasma VR
+    assert np.allclose(total["particle"]["D+"]["SUM"], np.zeros(3))
+
+# -------------------------
+# Warnings suppressed
+# -------------------------
+def test_apply_vr_warnings_suppressed():
+    sa = make_assigner(vol_rec={"D+": {21}})
+
+    sa.sources = {
+        "momentum": {
+            "atom-plasma": {
+                "D+": {21: np.ones(3)}
+            }
+        }
+    }
+    sa.particle_class = {
+        "momentum": {"atom-plasma": {"D+": "bulk_ions"}}
+    }
+
+    total = {"momentum": {"D+": {"SUM": np.zeros(3), 21: np.ones(3)}}}
+    warned = set()
+
+    sa._apply_normal_species_vr(
+        mom="momentum",
+        coll_dict=["atom-plasma"],
+        species="D+",
+        total=total,
+        vol_attr=sa.volume_recombination,
+        warned_species_strata=warned,
+        key_warn=("D+", "SUM"),
+        suppress_warning=False
+    )
+
+    # VR added to SUM
+    assert np.allclose(total["momentum"]["D+"]["SUM"], np.ones(3))
+    # No warning printed for momentum (we can track the warned set)
+    assert ("D+", "SUM") not in warned

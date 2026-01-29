@@ -196,93 +196,30 @@ class StrataAssigner:
 
     def sum_over_collisions(self, Te=1.0, Ti=1.0, include_vol_recomb=True):
         """
-        Return a collision-summed view of sources.
+        Return collision-summed view of sources.
 
         Rules:
-        - For normal strata, sum all collisions
-        - For strata="SUM", exclude 'plasma-plasma' collisions
-          and optionally include mapped strata from self.volume_recombination
-        - Electrons receive additional contributions from bulk ions for particle and energy moments
-          (energy contribution scaled by Te/Ti)
+        - Normal strata: sum all collisions
+        - SUM strata: skip 'plasma-plasma', optionally include VR
+        - Electrons receive additional contributions from bulk ions for particle and energy
+        moments (energy scaled by Te/Ti)
         - Raises ValueError if shapes are inconsistent
-        - Warnings are printed once per species per stratum for SUM strata,
-          suppressed for momentum and for molecules/test_ions/photons
+        - Warnings are printed once per species per stratum for SUM
+        (suppressed for momentum and molecules/test_ions/photons)
         """
         total = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
-        warned_species_strata = set()  # track warnings to print only once per species+stratum
+        warned_species_strata = set()
 
-        for mom in self.sources:
-            for coll in self.sources[mom]:
-                for species in self.sources[mom][coll]:
-                    for stratum, arr in self.sources[mom][coll].get(species, {}).items():
-                        # Skip plasma-plasma for SUM strata
-                        if stratum == "SUM" and coll == "plasma-plasma":
-                            continue
+        # ------------------------
+        # Step 1: sum all collisions
+        # ------------------------
+        self._sum_collisions(total)
 
-                        if total[mom][species][stratum] is None:
-                            total[mom][species][stratum] = arr.copy()
-                        else:
-                            if total[mom][species][stratum].shape != arr.shape:
-                                raise ValueError(
-                                    f"Inconsistent shapes for species {species}, moment {mom}, stratum {stratum}, collision {coll}: "
-                                    f"{total[mom][species][stratum].shape} vs {arr.shape}"
-                                )
-                            total[mom][species][stratum] += arr
-
-                    # Handle volume recombination (ONLY ONCE per species, ONLY to SUM)
-                    if include_vol_recomb and "SUM" in total[mom][species]:
-
-                        vol_attr = getattr(self, "volume_recombination", None)
-
-                        # determine particle class once
-                        particle_cls = self.particle_class[mom][coll][species]
-
-                        suppress_warning = (
-                            mom == "momentum"
-                            or particle_cls in {"molecules", "test_ions", "photons"}
-                        )
-
-                        species_strata_key = (species, "SUM")
-
-                        # -------------------------
-                        # Electrons: receive bulk-ion VR
-                        # -------------------------
-                        if particle_cls == "ELECTRONS" and mom in {"particle", "energy"} and vol_attr:
-
-                            for bulk_species, bulk_strata in vol_attr.items():
-
-                                # only from bulk ions
-                                if self.particle_class[mom][coll].get(bulk_species) != "bulk_ions":
-                                    continue
-
-                                for vol_stratum in bulk_strata:   # iterate set safely
-                                    for c in self.sources[mom]:
-                                        arr = self.sources[mom][c].get(bulk_species, {}).get(vol_stratum)
-                                        if arr is not None:
-                                            if total[mom][species]["SUM"].shape != arr.shape:
-                                                raise ValueError(
-                                                    f"Inconsistent shapes for electron VR from {bulk_species}, "
-                                                    f"moment {mom}, stratum {vol_stratum}"
-                                                )
-
-                                            factor = Te / Ti if mom == "energy" else 1.0
-                                            total[mom][species]["SUM"] += arr * factor
-
-                        # -------------------------
-                        # Normal species VR
-                        # -------------------------
-                        if vol_attr and species in vol_attr:
-
-                            for vol_stratum in vol_attr[species]:   # iterate set safely
-                                for c in self.sources[mom]:
-                                    arr = self.sources[mom][c].get(species, {}).get(vol_stratum)
-                                    if arr is not None:
-                                        if total[mom][species]["SUM"].shape != arr.shape:
-                                            raise ValueError(
-                                                f"Inconsistent shapes for VR of {species}, "
-                                                f"moment {mom}, stratum {vol_stratum}"
-                                            )
-                                        total[mom][species]["SUM"] += arr
+        # ------------------------
+        # Step 2: volume recombination (SUM only)
+        # ------------------------
+        if include_vol_recomb and hasattr(self, "volume_recombination"):
+            self._apply_volume_recombination(total, Te, Ti, warned_species_strata)
 
         return total
 
@@ -292,6 +229,107 @@ class StrataAssigner:
         """
         self._assert_structure()
         self._validate_schema()
+
+    # ------------------------
+    # Helper: sum all collisions
+    # ------------------------
+    def _sum_collisions(self, total):
+        for mom, coll_dict in self.sources.items():
+            for coll, species_dict in coll_dict.items():
+                for species, strata_dict in species_dict.items():
+                    for stratum, arr in strata_dict.items():
+                        if stratum == "SUM" and coll == "plasma-plasma":
+                            continue
+
+                        if total[mom][species][stratum] is None:
+                            total[mom][species][stratum] = arr.copy()
+                        else:
+                            if total[mom][species][stratum].shape != arr.shape:
+                                raise ValueError(
+                                    f"Inconsistent shapes for species {species}, "
+                                    f"moment {mom}, stratum {stratum}, collision {coll}: "
+                                    f"{total[mom][species][stratum].shape} vs {arr.shape}"
+                                )
+                            total[mom][species][stratum] += arr
+
+
+    # ------------------------
+    # Helper: volume recombination
+    # ------------------------
+    def _apply_volume_recombination(self, total, Te, Ti, warned_species_strata):
+        vol_attr = self.volume_recombination
+        for mom, coll_dict in self.sources.items():
+            for coll, species_dict in coll_dict.items():
+                for species in species_dict:
+                    # Only SUM gets VR
+                    if "SUM" not in total[mom][species]:
+                        continue
+
+                    particle_cls = self.particle_class[mom][coll][species]
+                    suppress_warning = (mom == "momentum") or (particle_cls in {"molecules", "test_ions", "photons"})
+                    key_warn = (species, "SUM")
+
+                    # ------------------------
+                    # electrons: bulk-ion VR
+                    # ------------------------
+                    if particle_cls == "ELECTRONS" and mom in {"particle", "energy"}:
+                        self._apply_electron_bulk_vr(mom, coll_dict, total, vol_attr, Te, Ti, warned_species_strata, key_warn, suppress_warning)
+
+                    # ------------------------
+                    # normal species VR
+                    # ------------------------
+                    if species in vol_attr:
+                        print(vol_attr)
+                        self._apply_normal_species_vr(mom, coll_dict, total, species, vol_attr, warned_species_strata, key_warn, suppress_warning)
+
+
+    # ------------------------
+    # Helper: electron bulk-ion VR
+    # ------------------------
+    def _apply_electron_bulk_vr(self, mom, coll_dict, total, vol_attr, Te, Ti, warned_species_strata, key_warn, suppress_warning):
+        # Loop over bulk species and their VR strata sets
+        for bulk_species, bulk_strata_set in vol_attr.items():
+            for bulk_stratum in bulk_strata_set:
+                included = False
+                for c in coll_dict:
+                    if c != "plasma-plasma":
+                        continue
+                    # bulk_arr is the array for this species, stratum, collision
+                    bulk_arr = self.sources[mom][c].get(bulk_species, {}).get(bulk_stratum)
+                    if bulk_arr is not None:
+                        factor = Te/Ti if mom == "energy" else 1.0
+                        # Always add to SUM
+                        if total[mom]["e-"]["SUM"] is None:
+                            total[mom]["e-"]["SUM"] = bulk_arr.copy() * factor
+                        else:
+                            total[mom]["e-"]["SUM"] += bulk_arr * factor
+                        included = True
+                if not included and key_warn not in warned_species_strata and not suppress_warning:
+                    print(f"Warning: electron VR from {bulk_species} stratum {bulk_stratum} not found")
+                    warned_species_strata.add(key_warn)
+
+
+
+    # ------------------------
+    # Helper: normal species VR
+    # ------------------------
+    def _apply_normal_species_vr(self, mom, coll_dict, total, species, vol_attr, warned_species_strata, key_warn, suppress_warning):
+        for vol_stratum in vol_attr[species]:
+            included = False
+            for c in coll_dict:
+                if c == "plasma-plasma":
+                    continue
+                arr = self.sources[mom][c].get(species, {}).get(vol_stratum)
+                if arr is not None:
+                    if total[mom][species]["SUM"] is None:
+                        total[mom][species]["SUM"] = arr.copy()
+                    else:
+                        total[mom][species]["SUM"] += arr
+                    included = True
+            if not included and key_warn not in warned_species_strata and not suppress_warning:
+                print(f"Warning: volume recombination stratum {vol_stratum} for {species} not found")
+                warned_species_strata.add(key_warn)
+
 
     def _validate_schema(self):
         """
