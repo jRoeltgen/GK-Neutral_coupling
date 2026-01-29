@@ -1,10 +1,11 @@
-import numpy as np
-import warnings
+import StrataAssigner as SA
+import extra_fort_schema
 import triangle_mesh as triangles
+
+import numpy as np
 import glob
 import scipy.constants as pyconst
-import math
-import platform 
+import platform
 from pathlib import Path
 # for debugging
 import pdb
@@ -28,7 +29,7 @@ class eirene:
             ny = self.fort44["meta"]["ny"]
             ns = self.fort44["meta"]["npls"]
             self.read_ft31(filepath / Path("fort.31"), nx+2, ny+2, ns)
-        
+
     def read_ft44(self, filename):
         print("Ft44Reader: assuming nlwrmsh = 1, nfla = 1.")
         with open(filename, "r") as fid:
@@ -39,12 +40,10 @@ class eirene:
             self.fort44["meta"]["nx"] = nx
             self.fort44["meta"]["ny"] = ny
             self.fort44["meta"]["ver"] = ver
-            self.fort44["meta"]["label"] = label            
-            
+            self.fort44["meta"]["label"] = label
+
             if ver not in (20081111, 20160829, 20170328, 20201006):
                 raise ValueError("Ft44Reader: unknown fort.44 format version")
-            #if ver == 20201006:
-            #    warnings.warn("Ft44Reader: format 20201006 not fully tested")
 
             # species counts
             natm, nmol, nion = map(int, fid.readline().split()[0:3])
@@ -56,7 +55,7 @@ class eirene:
             self.fort44["meta"]["molecule labels"] = []
             self.fort44["meta"]["ion labels"] = []
             self.fort44["meta"]["plasma labels"] = []
-            
+
             # species labels
             for i in range(natm):
                 self.fort44["meta"]["atom labels"].append(fid.readline())
@@ -100,7 +99,7 @@ class eirene:
             wld["ewlda"]  = np.zeros((nlim + nsts, natm, nstra + 1))
             wld["wldnm"]  = np.zeros((nlim + nsts, nmol, nstra + 1))
             wld["ewldm"]  = np.zeros((nlim + nsts, nmol, nstra + 1))
-            wld["wldra"]  = np.zeros((nlim + nsts, natm, nstra + 1))            
+            wld["wldra"]  = np.zeros((nlim + nsts, natm, nstra + 1))
             wld["wldrm"]  = np.zeros((nlim + nsts, nmol, nstra + 1))
 
             wld["wldnek"][:,0] = self.__read_ft_field(fid, ver, "wldnek", nlim+nsts)
@@ -131,7 +130,7 @@ class eirene:
             wldpp0 = self.__read_ft_field(fid, ver, "wldpp", (nlim+nsts, -1))
             _, npls = wldpp0.shape
             self.fort44["meta"]["npls"] = npls
-            
+
             wld["wldpp"] = np.zeros((nlim+nsts, npls, nstra+1))
             wld["wldpa"] = np.zeros((nlim+nsts, natm, nstra+1))
             wld["wldpm"] = np.zeros((nlim+nsts, nmol, nstra+1))
@@ -171,7 +170,7 @@ class eirene:
             neut["eneutrad"] = self.__read_ft_field(fid, ver, "eneutrad", (nx, ny, natm))
             neut["emolrad"] = self.__read_ft_field(fid, ver, "emolrad", (nx, ny, nmol))
             neut["eionrad"] = self.__read_ft_field(fid, ver, "eionrad", (nx, ny, nion))
-            
+
             self.__read_eirdiag(fid)
             ncl = self.fort44["meta"]["eirdiag_nds_ind"][-1]
             # Only non-standard surfaces
@@ -207,7 +206,7 @@ class eirene:
             neut_int["edena_int_b2"] = self.__read_ft_field(fid, ver, "edena_int_b2", (natm, nstrata))
             neut_int["edenm_int_b2"] = self.__read_ft_field(fid, ver, "edenm_int_b2", (nmol, nstrata))
             neut_int["edeni_int_b2"] = self.__read_ft_field(fid, ver, "edeni_int_b2", (nion, nstrata))
-            
+
         self.fort44["wld"] = wld
         self.fort44["neut"] = neut
         self.fort44["neut_int"] = neut_int
@@ -235,7 +234,7 @@ class eirene:
             new_string = new_string+s.replace("\n","")
         new_list = new_string.split(" ")
         self.fort44["meta"][fieldname] = [item for item in new_list if item != ""]
-        
+
     def read_ft46(self, filename):
         with open(filename, "r") as fid:
             # --- Dimensions/version
@@ -257,7 +256,7 @@ class eirene:
             self.fort46["atom labels"] = []
             self.fort46["molecule labels"] = []
             self.fort46["ion labels"] = []
-            
+
             # species labels
             for i in range(natm):
                 self.fort46["atom labels"].append(fid.readline())
@@ -265,7 +264,7 @@ class eirene:
                 self.fort46["molecule labels"].append(fid.readline())
             for i in range(nion):
                 self.fort46["ion labels"].append(fid.readline())
-            
+
             # --- Basic data
             self.fort46["pdena"]   = self.__read_ft_field(fid, ver, "pdena",  (ntri, natm))*1e6 #m^-3
             self.fort46["pdenm"]   = self.__read_ft_field(fid, ver, "pdenm",  (ntri, nmol))*1e6 #m^-3
@@ -333,14 +332,14 @@ class eirene:
             self.fort31["po"] = self.__read_ft31_field(f, nx, ny)
             # Cell volumes
             self.fort31["vol"] = self.__read_ft31_field(f, nx, ny)
-            
+
             # Magnetic field
             bb4 = self.__read_ft31_field(f, nx, ny)
             bb1 = self.__read_ft31_field(f, nx, ny)
             bb2 = self.__read_ft31_field(f, nx, ny)
             bb3 = self.__read_ft31_field(f, nx, ny)
             self.fort31["bb"] = np.stack([bb1, bb2, bb3, bb4], axis=-1)
-            
+
             # dummies
             for _ in range(4):
                 self.fort31["dummy3D"] = self.__read_ft31_field(f, nx, ny, ns)
@@ -360,17 +359,25 @@ class eirene:
     #       0 - atom-plasma; 1 - molecule-plasma; 2 - test ion-plasma; 3 - photon-plasma
     #    Third index is the source "species"
     #       0 - Electrons; 1 - Atoms; 2 - Molecules; 3 - Bulk Ions; 4 - Test ions
-    def load_extra_forts(self, eirene_path, extension="???"):
+    def load_extra_forts(self, eirene_path, extension="???",
+                         requested_strata=None, expected_species=None,
+                         vol_rec_mapping=None, debug=False):
         if isinstance(eirene_path, str):
             eirene_path = Path(eirene_path)
-       # path = eirene_path / Path("fort."+extension)
         filelist = eirene_path.glob("fort."+extension)
         ntria = len(self.triangle_mesh.cells[:,0])
-        self.particle_source = {}
-        self.momentum_source = {}
-        self.energy_source = {}
-        self.extra_source = {}
-        self.units = {"particle":{}, "momentum":{}, "energy":{}, "extra":{}}
+        loader = None
+        try:
+            loader = SA.StrataAssigner(inputfile=eirene_path / Path("input.dat")
+                                       , debug = debug)
+        except FileNotFoundError:
+            if requested_strata and expected_species and vol_rec_mapping:
+                loader = SA.StrataAssigner(requested_strata, expected_species,
+                                        vol_rec_mapping, debug = debug)
+            else:
+                loader = SA.StrataAssigner(debug = debug)
+        except Exception as e:
+            print(f"An unexpected error occured: {e}")
         file_read = False
         for current_file in filelist:
             file_read = True
@@ -384,15 +391,31 @@ class eirene:
                 raise ValueError(f"Number of triangles from mesh unequal to number from {current_file}")
             add_cells = int(lines_list[header_lines-1].split()[4])-1 - Ncells
             start_line = header_lines
-            while x*Ncells < len(lines_list):                
+            while x*Ncells < len(lines_list):
                 current_source = np.array([float(s.split()[2]) for s in lines_list[start_line:start_line+Ncells]])
-                self.__increment_sources(current_source, current_file.suffix, lines_list[start_line-6:start_line-3])
+                species = lines_list[start_line-5].strip()
+                units   = lines_list[start_line-4].strip()
+                moment_code = current_file.suffix[-3]
+                coll_code = current_file.suffix[-2]
+                particle_code = current_file.suffix[-1]
+
+                moment = extra_fort_schema.MOMENT_MAP[moment_code]
+                collision_type = extra_fort_schema.COLLISION_MAP[coll_code]
+                particle_type = extra_fort_schema.PARTICLE_CLASS_MAP[particle_code]
+                loader.ingest(moment, collision_type, particle_type, species,
+                              units, current_source)
+                #self.__increment_sources(current_source, current_file.suffix, lines_list[start_line-6:start_line-3])
                 x += 1
                 start_line += add_cells + header_lines + Ncells + 5
-                
+
         if not file_read:
             raise Exception("No sources read.")
-            
+
+        loader.finalize()
+        self.loaded_sources = loader
+        self.sources = loader.sum_over_collisions()
+
+
     def write_ft44(self, filename):
         meta = self.fort44["meta"]
         neut = self.fort44["neut"]
@@ -428,9 +451,9 @@ class eirene:
             self.__write_ft_field(fid, "emissmol")
             self.__write_ft_field(fid, "srcml")
             self.__write_ft_field(fid, "edissml")
-            
+
             # Write number of wall loading dimensions
-            fid.write(f'  {meta["nlim"]:4d}  {meta["nsts"]:4d}  {meta["nstra"]:4d}\n')            
+            fid.write(f'  {meta["nlim"]:4d}  {meta["nsts"]:4d}  {meta["nstra"]:4d}\n')
             self.__write_ft_field(fid, "wldnek", 0)
             self.__write_ft_field(fid, "wldnep", 0)
             self.__write_ft_field(fid, "wldna", 0)
@@ -475,7 +498,7 @@ class eirene:
             self.__write_ft_field(fid, "eneutrad")
             self.__write_ft_field(fid, "emolrad")
             self.__write_ft_field(fid, "eionrad")
-            
+
             self.__write_ft_field(fid, "eirdiag_nds_ind")
             self.__write_ft_field(fid, "eirdiag_nds_typ")
             self.__write_ft_field(fid, "eirdiag_nds_srf")
@@ -491,7 +514,7 @@ class eirene:
             self.__write_ft_field(fid, "ewldrp_res")
             self.__write_ft_field(fid, "ewldmr_res")
             self.__write_ft_field(fid, "wldspt_res")
-            self.__write_ft_field(fid, "wldspta_res")                                                
+            self.__write_ft_field(fid, "wldspta_res")
             self.__write_ft_field(fid, "wldsptm_res")
             self.__write_ft_field(fid, "wlpump_res(A)", header="atom labels")
             self.__write_ft_field(fid, "wlpump_res(M)", header="molecule labels")
@@ -510,8 +533,8 @@ class eirene:
             self.__write_ft_field(fid, "edeni_int")
             self.__write_ft_field(fid, "edena_int_b2")
             self.__write_ft_field(fid, "edenm_int_b2")
-            self.__write_ft_field(fid, "edeni_int_b2")            
-            
+            self.__write_ft_field(fid, "edeni_int_b2")
+
         fid.close()
 
     def write_ft46(self, filename):
@@ -593,11 +616,11 @@ class eirene:
             self.__write_ft31_field(f, "po")
             # Cell volumes
             self.__write_ft31_field(f, "vol")
-            
+
             # Magnetic field
             self.__write_ft31_field(f, "bb")
-            
-            # dummies            
+
+            # dummies
             for _ in range(4):
                 self.__write_ft31_field(f, "dummy3D")
             for _ in range(8):
@@ -612,7 +635,7 @@ class eirene:
     def __read_ft_field(self, fid, ver, fieldname, dims, num_hentries=0, species_type=None):
         """
         Read a real field from fort.44 file, consistent with MATLAB read_ft44_rfield.
-        
+
         Parameters
         ----------
         fid : file object
@@ -624,7 +647,7 @@ class eirene:
         dims : tuple[int]
            Shape of the expected array (Fortran-order)
            if a dimension is negative, it is calculated from value read in
-    
+
         Returns
         -------
         np.ndarray
@@ -633,7 +656,7 @@ class eirene:
         if isinstance(dims, int):
             has_negative = dims<0
         else:
-            has_negative = any(x<0 for x in dims)            
+            has_negative = any(x<0 for x in dims)
         # --- Version >= 20160829: search for header line
         if ver >= 20160829:
             line = fid.readline()
@@ -725,11 +748,11 @@ class eirene:
                     format_spec = ' 14.8E'
                 elif key != "ewldt_res":
                     arr = np.reshape(arr, [ncl*arr.shape[0],1,1], order='F')
-                
+
         elif key in self.fort46:
             arr = self.fort46[key] * 10  # x10 for weird formatting
             nx,ny = arr.shape
-            ns = 1            
+            ns = 1
             arr = np.reshape(arr,[nx*ny, 1, ns],order='F')
             nline = 6
             fort44 = False
@@ -758,7 +781,7 @@ class eirene:
             else:
                 raise ValueError(f"Field {key} should have 2 or 3 dimensions")
         if(len(arr.shape)==1):
-            arr = np.reshape(arr,[arr.shape[0],1,1],order='F')        
+            arr = np.reshape(arr,[arr.shape[0],1,1],order='F')
         elif(len(arr.shape)==2):
             arr = np.reshape(arr,[arr.shape[0],arr.shape[1],1],order='F')
         nx,ny,ns = arr.shape
@@ -777,7 +800,7 @@ class eirene:
         if header:
             arr = np.reshape(arr,[nx*ny,1,1],order='F')
             nlim = nlim*ny
-            nx,ny,ns = arr.shape    
+            nx,ny,ns = arr.shape
             nh = len(self.fort44["meta"][header])
             for i in range(0, nh, nline):
                 line = ""
@@ -801,22 +824,22 @@ class eirene:
                 first_time = True
                 while i+offset<nx:
                 #for i in range(0, nx, nline):
-                    line = ""                    
+                    line = ""
                     for ind,v in enumerate(values[i+offset:min(i+offset+nline,len(values))]):
                         formatted_number = f"{v:{format_spec}}"
                         if isfloat:
-                            mantissa, exponent = formatted_number.split('E')                        
+                            mantissa, exponent = formatted_number.split('E')
                             if fort44: # Denotes it being a fort.44 file
                                 formatted_exponent = f"{int(exponent):+04d}"
                             else:
                                 mantissa = mantissa[:-1].replace(".","").replace("-","-0.").replace(" "," 0.")
-                                formatted_exponent = f"{int(exponent):+03d}"                            
+                                formatted_exponent = f"{int(exponent):+03d}"
                             final_num = f"{mantissa}E{formatted_exponent}"
                         else:
                             final_num = " "+formatted_number
                         line = line+" "+final_num
 
-                    if (i+nline>nlim and first_time):                        
+                    if (i+nline>nlim and first_time):
                         values = values2
                         offset = ind + 1
                         first_time = False
@@ -860,7 +883,7 @@ class eirene:
             raise ValueError(f"read_eirdiag_error: inconsistent number of input elements")
         my_list = list(map(int, my_list))
         return np.array(my_list)
-            
+
     def __read_ft31_field(self, f, nx, ny, ns=1, f_is_list=False):
         field = np.zeros((nx, ny, ns))
         cols = 5
@@ -889,10 +912,10 @@ class eirene:
                                     numbers.append(float(v.replace("+","E+")))
                                 else:
                                     numbers.append(float("E-".join(v.rsplit("-",1))))
-                                
+
                     values.extend(numbers)
                 field[:, j, i] = values[:nx]
-                    
+
         if ns == 1:
             field = field[:, :, 0]  # drop the extra dimension if scalar
         return field
@@ -930,12 +953,12 @@ class eirene:
                 if (i>=starting_line and i<(starting_line+lines_to_read)):
                     lines_list.append(line)
         return lines_list
-            
+
     def __read_until_pattern(self, filepath, pattern):
         """
         Reads a file line by line and collects lines into a list
         until a specified pattern is found.
-        
+
         Args:
           filepath (str): The path to the file to read.
           pattern (str): The string pattern to search for.
@@ -960,31 +983,14 @@ class eirene:
     def __increment_sources(self, current_source, current_file, info):
         species = info[-2].strip()
         units = info[-1].strip()
-        # Add to source 
-        if(current_file[-3]=='1'):
-            # Add new species to dictionary
-            if(species not in self.particle_source.keys()):
-                self.particle_source[species] = 0
-            self.particle_source[species] += current_source
-            # self.particle_source[species+"_nescl"] += current_source
-            self.units["particle"][species] = units
-        elif(current_file[-3]=='2'):
-            if(species not in self.momentum_source.keys()):            
-                self.momentum_source[species] = 0
-            self.momentum_source[species] += current_source
-            # self.momentum_source[species+"_nescl"] += current_source
-            self.units["momentum"][species] = units
-        elif(current_file[-3]=='3'):
-            if(species not in self.energy_source.keys()):            
-                self.energy_source[species] = 0
-            self.energy_source[species] += current_source
-            # self.energy_source[species+"_nescl"] += current_source
-            self.units["energy"][species] = units
-        else:
-            if(species not in self.extra_source.keys()):
-                self.extra_source[species] = 0
-            self.extra_source[species] += current_source
-            # self.extra_source[species+"_nescl"] += current_source
-            self.units["extra"] = units
-            
+        moment_code = current_file[-3]
+        coll_code = current_file[-2]
+        particle_code = current_file[-1]
 
+        moment = extra_fort_schema.MOMENT_MAP[moment_code]
+        collision_type = extra_fort_schema.COLLISION_MAP[coll_code]
+        particle_type = extra_fort_schema.PARTICLE_CLASS_MAP[particle_code]
+        # Add to source
+        self.sources[moment][species][collision_type] = current_source
+        self.units[moment][species][collision_type] = units
+        self.particle_type[moment][species][collision_type] = particle_type
