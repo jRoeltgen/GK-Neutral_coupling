@@ -61,7 +61,10 @@ class StrataAssigner:
         self.expected_species_by_particle_class = {
             k: set(v) for k, v in expected_species_by_particle_class.items()
         }
-        self.volume_recombination = vol_rec_mapping
+        self.volume_recombination = {
+            k: (set(v) if isinstance(v, (set, list, tuple)) else {v})
+            for k, v in vol_rec_mapping.items()
+        }
         self._normalize_strata_order()
 
         # internal state
@@ -70,6 +73,7 @@ class StrataAssigner:
         # output storage
         self.sources = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
         self.units = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
+        self.particle_class = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
     def ingest(self, moment, collision, particle_class, species, units, current_source):
         """
@@ -144,7 +148,7 @@ class StrataAssigner:
 
             # volume recombination stratum
             if species in self.volume_recombination:
-                allowed.add(self.volume_recombination[species])
+                allowed.update(self.volume_recombination[species])
 
             # SUM is always allowed
             allowed.add("SUM")
@@ -166,6 +170,7 @@ class StrataAssigner:
 
                 self.sources[moment][collision][species][req] += current_source
                 self.units[moment][collision][species][req] = units
+                self.particle_class[moment][collision][species] = particle_class
 
             return   # do not fall through
 
@@ -184,7 +189,7 @@ class StrataAssigner:
         # accumulate
         self.sources[moment][collision][species][req] += current_source
         self.units[moment][collision][species][req] = units
-
+        self.particle_class[moment][collision][species] = particle_class
 
         # advance strata for THIS group only
         self._group_req_idx[group_key] += 1
@@ -208,87 +213,76 @@ class StrataAssigner:
 
         for mom in self.sources:
             for coll in self.sources[mom]:
-                for stratum in self.sources[mom][coll]:
-                    for species, arr in self.sources[mom][coll].get(stratum, {}).items():
+                for species in self.sources[mom][coll]:
+                    for stratum, arr in self.sources[mom][coll].get(species, {}).items():
                         # Skip plasma-plasma for SUM strata
                         if stratum == "SUM" and coll == "plasma-plasma":
                             continue
 
-                        if total[mom][stratum][species] is None:
-                            total[mom][stratum][species] = arr.copy()
+                        if total[mom][species][stratum] is None:
+                            total[mom][species][stratum] = arr.copy()
                         else:
-                            if total[mom][stratum][species].shape != arr.shape:
+                            if total[mom][species][stratum].shape != arr.shape:
                                 raise ValueError(
                                     f"Inconsistent shapes for species {species}, moment {mom}, stratum {stratum}, collision {coll}: "
-                                    f"{total[mom][stratum][species].shape} vs {arr.shape}"
+                                    f"{total[mom][species][stratum].shape} vs {arr.shape}"
                                 )
-                            total[mom][stratum][species] += arr
+                            total[mom][species][stratum] += arr
 
-                # Handle volume recombination for SUM strata
-                if stratum == "SUM" and include_vol_recomb:
-                    vol_attr = getattr(self, "volume_recombination", None)
-                    for species in total[mom][stratum]:
-                        # Determine particle class for warning suppression
-                        particle_cls = None
-                        for c in self.sources[mom]:
-                            particle_cls = self.particle_type[mom][species].get(c, None)
-                            if particle_cls is not None:
-                                break
+                    # Handle volume recombination (ONLY ONCE per species, ONLY to SUM)
+                    if include_vol_recomb and "SUM" in total[mom][species]:
 
-                        # Skip volume recombination warnings for momentum or special particle classes
-                        suppress_warning = (mom == "momentum") or (particle_cls in {"molecules", "test_ions", "photons"})
-                        species_strata_key = (species, stratum)
+                        vol_attr = getattr(self, "volume_recombination", None)
 
-                        # Electrons special case: sum bulk ion contributions
-                        if particle_cls == "electrons" and mom in {"particle", "energy"}:
-                            if vol_attr is not None:
-                                for bulk_species, bulk_stratum in vol_attr.items():
-                                    bulk_cls = None
+                        # determine particle class once
+                        particle_cls = self.particle_class[mom][coll][species]
+
+                        suppress_warning = (
+                            mom == "momentum"
+                            or particle_cls in {"molecules", "test_ions", "photons"}
+                        )
+
+                        species_strata_key = (species, "SUM")
+
+                        # -------------------------
+                        # Electrons: receive bulk-ion VR
+                        # -------------------------
+                        if particle_cls == "ELECTRONS" and mom in {"particle", "energy"} and vol_attr:
+
+                            for bulk_species, bulk_strata in vol_attr.items():
+
+                                # only from bulk ions
+                                if self.particle_class[mom][coll].get(bulk_species) != "bulk_ions":
+                                    continue
+
+                                for vol_stratum in bulk_strata:   # iterate set safely
                                     for c in self.sources[mom]:
-                                        bulk_cls = self.particle_type[mom][bulk_species].get(c, None)
-                                        if bulk_cls is not None:
-                                            break
-                                    if bulk_cls == "bulk_ions":
-                                        included = False
-                                        for c in self.sources[mom]:
-                                            if bulk_stratum in self.sources[mom][c]:
-                                                arr = self.sources[mom][c][bulk_stratum].get(bulk_species, None)
-                                                if arr is not None:
-                                                    if total[mom][stratum][species].shape != arr.shape:
-                                                        raise ValueError(
-                                                            f"Inconsistent shapes for electron volume recombination from {bulk_species}, moment {mom}, stratum {bulk_stratum}, collision {c}: "
-                                                            f"{total[mom][stratum][species].shape} vs {arr.shape}"
-                                                        )
-                                                    factor = Te/Ti if mom == "energy" else 1.0
-                                                    total[mom][stratum][species] += arr * factor
-                                                    included = True
-                                        if not included and not suppress_warning and species_strata_key not in warned_species_strata:
-                                            print(f"Warning: electron volume recombination from bulk ion {bulk_species} not found for stratum {bulk_stratum}, assuming 0")
-                                            warned_species_strata.add(species_strata_key)
+                                        arr = self.sources[mom][c].get(bulk_species, {}).get(vol_stratum)
+                                        if arr is not None:
+                                            if total[mom][species]["SUM"].shape != arr.shape:
+                                                raise ValueError(
+                                                    f"Inconsistent shapes for electron VR from {bulk_species}, "
+                                                    f"moment {mom}, stratum {vol_stratum}"
+                                                )
 
-                        # Regular volume recombination for other species
-                        if vol_attr is not None and species in vol_attr:
-                            vol_stratum = vol_attr[species]
-                            included = False
-                            for c in self.sources[mom]:
-                                if vol_stratum in self.sources[mom][c]:
-                                    arr = self.sources[mom][c][vol_stratum].get(species, None)
+                                            factor = Te / Ti if mom == "energy" else 1.0
+                                            total[mom][species]["SUM"] += arr * factor
+
+                        # -------------------------
+                        # Normal species VR
+                        # -------------------------
+                        if vol_attr and species in vol_attr:
+
+                            for vol_stratum in vol_attr[species]:   # iterate set safely
+                                for c in self.sources[mom]:
+                                    arr = self.sources[mom][c].get(species, {}).get(vol_stratum)
                                     if arr is not None:
-                                        if total[mom][stratum][species].shape != arr.shape:
+                                        if total[mom][species]["SUM"].shape != arr.shape:
                                             raise ValueError(
-                                                f"Inconsistent shapes for volume recombination of species {species}, moment {mom}, stratum {vol_stratum}, collision {c}: "
-                                                f"{total[mom][stratum][species].shape} vs {arr.shape}"
+                                                f"Inconsistent shapes for VR of {species}, "
+                                                f"moment {mom}, stratum {vol_stratum}"
                                             )
-                                        total[mom][stratum][species] += arr
-                                        included = True
-                            if not included and not suppress_warning and species_strata_key not in warned_species_strata:
-                                print(f"Warning: volume recombination stratum {vol_stratum} for species {species} not found, assuming 0")
-                                warned_species_strata.add(species_strata_key)
-
-                        # Missing volume_recombination attribute or species mapping
-                        elif vol_attr is None and not suppress_warning and species_strata_key not in warned_species_strata:
-                            print(f"Warning: volume recombination for species {species} unknown, assuming 0")
-                            warned_species_strata.add(species_strata_key)
+                                        total[mom][species]["SUM"] += arr
 
         return total
 
