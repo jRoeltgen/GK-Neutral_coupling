@@ -62,11 +62,11 @@ class gkeyll:
         self.interpolated_surfz_data = {}
 
         if self.fast_reflection:
-            copper_data = np.genfromtxt('GK-Neutral_coupling/reflection_data/DonCu.txt', skip_header=1,delimiter=',')
+            copper_data = np.genfromtxt('GK-Neutral_coupling/reflection_data/65_DonCu.txt', skip_header=1,delimiter=',')
             copper_data[:,0] = copper_data[:,0]*1000*self.eV # Convert from keV to J
             self.Cuinterpolator = interp1d(copper_data[:,0], copper_data[:,1], bounds_error=False, fill_value='extrapolate')
 
-            lithium_data = np.genfromtxt('GK-Neutral_coupling/reflection_data/DonLi.txt', skip_header=1,delimiter=',')
+            lithium_data = np.genfromtxt('GK-Neutral_coupling/reflection_data/65_DonLi.txt', skip_header=1,delimiter=',')
             lithium_data[:,0] = lithium_data[:,0]*1000*self.eV # Convert from keV to J
             self.Liinterpolator = interp1d(lithium_data[:,0], lithium_data[:,1], bounds_error=False, fill_value='extrapolate')
 
@@ -846,6 +846,9 @@ class gkeyll:
         if self.fast_reflection:
             self.interpolated_surfr_data["tm"] =  (self.masses["molecule"]/3) * (self.interpolated_surfr_data["moleculeM2"] - self.interpolated_surfr_data["moleculeM1"]**2 / self.interpolated_surfr_data["moleculeM0"])/self.interpolated_surfr_data["moleculeM0"]
             self.interpolated_surfr_data["tm"][self.interpolated_surfr_data["tm"] < 0] = 100*self.eV
+            self.interpolated_surfr_data["um"] = -self.interpolated_data["moleculeM1"]/self.interpolated_data["moleculeM0"]
+            # Energy used for fast reflection which is half of energy
+            self.interpolated_surfr_data["em"] = 0.5 * (self.interpolated_surfr_data["phi"]*self.eV + self.interpolated_surfr_data["tm"] + 0.5*self.masses["molecule"]*self.interpolated_surfr_data["um"]*self.interpolated_surfr_data["um"])
 
 
     def calc_derived_surfz_data(self, b2dat, edat):
@@ -859,13 +862,20 @@ class gkeyll:
         if self.fast_reflection:
             self.interpolated_surfz_data["tm"] =  (self.masses["molecule"]/3) * (self.interpolated_surfz_data["moleculeM2"] - self.interpolated_surfz_data["moleculeM1"]**2 / self.interpolated_surfz_data["moleculeM0"])/self.interpolated_surfz_data["moleculeM0"]
             self.interpolated_surfz_data["tm"][self.interpolated_surfz_data["tm"] < 0] = 100*self.eV
+            self.interpolated_surfz_data["um"] = -self.interpolated_data["moleculeM1"]/self.interpolated_data["moleculeM0"]
+            # Energy used for fast reflection which is half of energy
+            self.interpolated_surfz_data["em"] = 0.5 * (self.interpolated_surfz_data["phi"]*self.eV + self.interpolated_surfz_data["tm"] + 0.5*self.masses["molecule"]*self.interpolated_surfz_data["um"]*self.interpolated_surfz_data["um"])
 
 
-    def populate_ft31(self, edat):
+    def populate_ft31(self, b2dat, edat):
         ft31 = edat.fort31
 
         if self.fast_reflection:
-            duplicated_volume_keys = ["na", "ua", "up", "ww", "vv"]
+            zero_volume_keys = ["na"]
+            for key in zero_volume_keys:
+                last_col = np.zeros_like(self.interpolated_data[key][:,:,-1])
+                self.interpolated_data[key] = np.dstack((self.interpolated_data[key], last_col, last_col, last_col))
+            duplicated_volume_keys = ["ua", "up", "ww", "vv"]
             for key in duplicated_volume_keys:
                 last_col = self.interpolated_data[key][:,:,-1].copy()
                 self.interpolated_data[key] = np.dstack((self.interpolated_data[key], last_col, last_col, last_col))
@@ -873,6 +883,10 @@ class gkeyll:
 
         #Volume data
         ft31["na"] = self.interpolated_data["na"]
+        #Set up an ionizing core boundary
+        core_indices = np.sort(np.concatenate((np.arange(b2dat.gmtry["leftcut"][0],b2dat.gmtry["leftcut"][1]), np.arange(b2dat.gmtry["rightcut"][1],b2dat.gmtry["rightcut"][0]))))
+        ft31["na"][core_indices, 0, 0] = 1.0e30;
+
         ft31["up"] = self.interpolated_data["up"]
         ft31["vv"] = self.interpolated_data["vv"]
         ft31["ww"] = self.interpolated_data["ww"]
@@ -885,8 +899,8 @@ class gkeyll:
             ft31["ion_charge"] = np.ones_like(ft31["na"])
 
         if self.fast_reflection:
-            CuCoeff = self.Cuinterpolator(self.interpolated_surfz_data['tm'])
-            LiCoeff = self.Liinterpolator(self.interpolated_surfr_data['tm'])
+            CuCoeff = self.Cuinterpolator(self.interpolated_surfz_data['em'])
+            LiCoeff = self.Liinterpolator(self.interpolated_surfr_data['em'])
             species2_x = 2.0*CuCoeff
             species2_y = 0.0
             species3_x = self.final_cu_rec_coeff - CuCoeff
