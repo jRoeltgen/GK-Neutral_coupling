@@ -10,7 +10,7 @@ def make_assigner(
     debug=False
 ):
     if vol_rec is None:
-        vol_rec = {}
+        vol_rec = {"particle":{}, "energy":{}}
 
     return StrataAssigner(
         requested_strata=list(requested_strata),
@@ -60,8 +60,10 @@ def test_basic_strata_sequence():
 def test_plasma_plasma_volume_recombination_assignment():
     sa = make_assigner(
         vol_rec={
-            "D+": {21},
-            "T+": {22},
+            "particle":{
+                "D+": {21},
+                "T+": {22},
+            },"energy":{}
         }
     )
 
@@ -86,7 +88,7 @@ def test_plasma_plasma_volume_recombination_assignment():
 def test_plasma_plasma_stratum_skipping():
     sa = make_assigner(
         requested_strata=[21, 22, "SUM"],
-        vol_rec={"T+": {22}}
+        vol_rec={"particle":{"T+": {22}},"energy":{}}
     )
 
     ingest_series(sa, [
@@ -105,8 +107,10 @@ def test_plasma_plasma_stratum_skipping():
 def test_group_local_indexing():
     sa = make_assigner(
         vol_rec={
-            "D+": {21},
-            "T+": {22},
+            "particle":{
+                "D+": {21},
+                "T+": {22},
+            },"energy":{}
         }
     )
 
@@ -138,7 +142,7 @@ def test_sum_over_collisions_simple():
     ])
 
     summed_over_collisions = sa.sum_over_collisions()
-    #pdb.set_trace()
+
     summed = summed_over_collisions["particle"]["D"][21]
     assert summed == pytest.approx(6.0)
 
@@ -180,8 +184,10 @@ def test_sum_over_collisions_with_sum_stratum():
 def test_VR_only_adds_to_SUM():
     sa = make_assigner(
         vol_rec={
-            "D+": {21},
-            "T+": {22},
+            "particle":{
+                "D+": {21},
+                "T+": {22},
+            },"energy":{}
         }
     )
 
@@ -202,7 +208,7 @@ def test_VR_only_adds_to_SUM():
 def test_electrons_get_bulk_ion_vr():
     sa = make_assigner(
         vol_rec={
-            "D+": {21},
+            "particle":{"D+": {21}},"energy":{}
         }
     )
 
@@ -241,7 +247,7 @@ def test_SUM_excludes_plasma_plasma():
 def test_Te_Ti_scaling_energy():
     sa = make_assigner(
         vol_rec={
-            "D+": {21},
+            "particle":{},"energy":{"D+": {21}},
         }
     )
 
@@ -285,7 +291,7 @@ def test_sum_over_collisions_does_not_mix_moments():
 # Electron VR helpers
 # -------------------------
 def test_apply_electron_bulk_vr_particle():
-    sa = make_assigner(vol_rec={"D+": {21}})
+    sa = make_assigner(vol_rec={"particle":{"D+": {21}},"energy":{}})
 
     # minimal sources
     sa.sources = {
@@ -314,6 +320,7 @@ def test_apply_electron_bulk_vr_particle():
         vol_attr=sa.volume_recombination,
         Te=1.0,
         Ti=1.0,
+        el_species="e-",
         warned_species_strata=warned,
         key_warn=("e-", "SUM"),
         suppress_warning=False
@@ -326,6 +333,7 @@ def test_apply_electron_bulk_vr_particle():
         vol_attr=sa.volume_recombination,
         Te=1.0,
         Ti=1.0,
+        el_species="e-",
         warned_species_strata=warned,
         key_warn=("e-", "SUM"),
         suppress_warning=False
@@ -335,7 +343,7 @@ def test_apply_electron_bulk_vr_particle():
     assert np.allclose(total["particle"]["e-"]["SUM"], np.ones(3))
 
 def test_apply_electron_bulk_vr_energy_scaling():
-    sa = make_assigner(vol_rec={"D+": {21}})
+    sa = make_assigner(vol_rec={"particle":{},"energy":{"D+": {21}}})
 
     sa.sources = {
         "energy": {
@@ -362,9 +370,10 @@ def test_apply_electron_bulk_vr_energy_scaling():
         mom="energy",
         coll_dict=["plasma-plasma"],
         total=total,
-        vol_attr=sa.volume_recombination,
+        vol_attr=sa.volume_recombination["energy"],
         Te=Te,
         Ti=Ti,
+        el_species="e-",
         warned_species_strata=warned,
         key_warn=("e-", "SUM"),
         suppress_warning=False
@@ -377,7 +386,7 @@ def test_apply_electron_bulk_vr_energy_scaling():
 # Normal species VR helpers
 # -------------------------
 def test_apply_normal_species_vr_only_sum():
-    sa = make_assigner(vol_rec={"D+": {21}})
+    sa = make_assigner(vol_rec={"particle":{"D+": {21}},"energy":{}})
 
     sa.sources = {
         "particle": {
@@ -398,7 +407,7 @@ def test_apply_normal_species_vr_only_sum():
         coll_dict=["atom-plasma"],
         species="D+",
         total=total,
-        vol_attr=sa.volume_recombination,
+        vol_attr=sa.volume_recombination["particle"],
         warned_species_strata=warned,
         key_warn=("D+", "SUM"),
         suppress_warning=False
@@ -411,7 +420,7 @@ def test_apply_normal_species_vr_only_sum():
     assert np.allclose(total["particle"]["D+"][21], np.ones(3))
 
 def test_apply_normal_species_vr_plasma_plasma_excluded():
-    sa = make_assigner(vol_rec={"D+": {21}})
+    sa = make_assigner(vol_rec={"particle":{"D+": {21}},"energy":{}})
 
     sa.sources = {
         "particle": {
@@ -432,7 +441,7 @@ def test_apply_normal_species_vr_plasma_plasma_excluded():
         coll_dict=["plasma-plasma"],
         species="D+",
         total=total,
-        vol_attr=sa.volume_recombination,
+        vol_attr=sa.volume_recombination["particle"],
         warned_species_strata=warned,
         key_warn=("D+", "SUM"),
         suppress_warning=False
@@ -445,7 +454,14 @@ def test_apply_normal_species_vr_plasma_plasma_excluded():
 # Warnings suppressed
 # -------------------------
 def test_apply_vr_warnings_suppressed():
-    sa = make_assigner(vol_rec={"D+": {21}})
+    sa = make_assigner(
+        vol_rec={
+                "particle":{
+                    "D+": {21},
+                },
+                "energy":{}
+            }
+        )
 
     sa.sources = {
         "momentum": {
@@ -466,7 +482,7 @@ def test_apply_vr_warnings_suppressed():
         coll_dict=["atom-plasma"],
         species="D+",
         total=total,
-        vol_attr=sa.volume_recombination,
+        vol_attr=sa.volume_recombination["particle"],
         warned_species_strata=warned,
         key_warn=("D+", "SUM"),
         suppress_warning=False

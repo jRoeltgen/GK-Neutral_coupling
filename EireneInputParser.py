@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from extra_fort_schema import PSEUDO_SPECIES
 
 class EireneInputParser:
     """
@@ -33,7 +34,7 @@ class EireneInputParser:
         }
 
         # unified mapping: atomic + bulk species -> stratum
-        self.volume_recombination = {}      # {species_name: stratum}
+        self.volume_recombination = {"particle":{}, "energy":{}} # {species_name: stratum}
 
     # ---------------------------
     # MASTER
@@ -45,6 +46,7 @@ class EireneInputParser:
         # add EIRENE internal sum-species
         self.add_internal_group_species()
         self.parse_volume_recombination()
+        self.propagate_volume_recombination_to_pseudo_species()
 
         self.validate_schema()
         if self.report.has_issues():
@@ -165,7 +167,7 @@ class EireneInputParser:
                 atomic_species = m.group(2)
 
                 # add atomic species
-                self.volume_recombination[atomic_species] = stratum
+                self.volume_recombination["particle"][atomic_species] = stratum
 
                 # 5 lines below → bulk species index
                 bulk_line = self.lines[i+5].strip()
@@ -177,7 +179,7 @@ class EireneInputParser:
                 bulk_species = bulk_index_map.get(bulk_index, None)
                 if bulk_species is not None:
                     # add bulk ion species with same stratum
-                    self.volume_recombination[bulk_species] = stratum
+                    self.volume_recombination["particle"][bulk_species] = stratum
                 else:
                     print(
                         f"Warning: bulk ion index {bulk_index} not found for "
@@ -193,17 +195,42 @@ class EireneInputParser:
         - TEST IONS   = sum over test ion species
         - MOLECULES   = sum over molecular species
         """
-        if len(self.species.get("atoms", [])) >= 1:
-            if "ATOMS" not in self.species["atoms"]:
-                self.species["atoms"].append("ATOMS")
+        energy_contract_sp = ["atoms", "test_ions", "molecules"]
+        for key in energy_contract_sp:
+            if len(self.species.get(key, [])) >= 1:
+                if PSEUDO_SPECIES[key] not in self.species[key]:
+                    self.species[key].append(PSEUDO_SPECIES[key])
 
-        if len(self.species.get("test_ions", [])) >= 1:
-            if "TEST IONS" not in self.species["test_ions"]:
-                self.species["test_ions"].append("TEST IONS")
+    def propagate_volume_recombination_to_pseudo_species(self):
+        """
+        Map physical VR strata onto EIRENE pseudo-species
+        (ATOMS, MOLECULES, TEST IONS) for energy channels.
+        """
+        if not hasattr(self, "volume_recombination"):
+            return
+        vr = self.volume_recombination["particle"]
+        new_vr = {}
 
-        if len(self.species.get("molecules", [])) >= 1:
-            if "MOLECULES" not in self.species["molecules"]:
-                self.species["molecules"].append("MOLECULES")
+        for cls, pseudo in PSEUDO_SPECIES.items():
+            # physical species in this particle class
+            phys_species = self.species.get(cls, [])
+            if not phys_species:
+                continue
+
+            # collect VR strata from physical species
+            strata = set()
+            for sp in phys_species:
+                if sp in vr:
+                    s = vr[sp]
+                    if isinstance(s, (set, list, tuple)):
+                        strata |= set(s)
+                    else:
+                        strata.add(s)
+
+            # assign to pseudo-species
+            if strata:
+                new_vr[pseudo] = strata
+        self.volume_recombination["energy"] = new_vr
 
 
     # ---------------------------
@@ -224,17 +251,27 @@ class EireneInputParser:
 
         # volume recombination consistency
         if "SUM" in self.requested_strata:
-            for atom, strata in self.volume_recombination.items():
-                if atom not in self.species.get("atoms", []) and atom not in self.species.get("bulk_ions", []):
-                    self.report.warn(
-                        f"Volume recombination defined for '{atom}', but species not found in atom list"
-                    )
+            for _,type in self.volume_recombination.items():
+                for atom, strata in type.items():
+                    if atom not in self.species.get("atoms", []) and atom not in self.species.get("bulk_ions", []):
+                        self.report.warn(
+                            f"Volume recombination defined for '{atom}', but species not found in atom list"
+                        )
 
 
-                if strata not in self.requested_strata:
-                    self.report.warn(
-                        f"Volume recombination stratum {strata} for '{atom}' not in requested strata list"
-                    )
+                    # normalize strata to a set
+                    if isinstance(strata, (set, list, tuple)):
+                        strata_set = set(strata)
+                    else:
+                        strata_set = {strata}
+
+                    missing = strata_set - set(self.requested_strata)
+
+                    if missing:
+                        self.report.warn(
+                            f"Volume recombination strata {sorted(missing)} for '{atom}' not in requested strata list"
+                        )
+
 
     def _print_debug_summary(self):
         print("\n[EIRENE INPUT DEBUG SUMMARY]")

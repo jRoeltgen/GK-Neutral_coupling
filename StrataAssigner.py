@@ -1,6 +1,6 @@
 from collections import defaultdict
 import EireneInputParser
-import colorama
+from extra_fort_schema import PSEUDO_SPECIES
 from colorama import Fore, Style
 import numpy as np
 import pdb
@@ -61,11 +61,19 @@ class StrataAssigner:
         self.expected_species_by_particle_class = {
             k: set(v) for k, v in expected_species_by_particle_class.items()
         }
-        self.volume_recombination = {
+
+        self.volume_recombination = {"particle":{}, "energy":{}}
+        self.volume_recombination["particle"] = {
             k: (set(v) if isinstance(v, (set, list, tuple)) else {v})
-            for k, v in vol_rec_mapping.items()
+            for k, v in vol_rec_mapping["particle"].items()
         }
+        self.volume_recombination["energy"] = {
+            k: (set(v) if isinstance(v, (set, list, tuple)) else {v})
+            for k, v in vol_rec_mapping["energy"].items()
+        }
+
         self._normalize_strata_order()
+        #self._build_species_to_class()
 
         # internal state
         self._group_req_idx = defaultdict(int)
@@ -110,11 +118,12 @@ class StrataAssigner:
 
         allowed = None
         if collision == "plasma-plasma":
-            raw = self.volume_recombination.get(species, set())
-            if isinstance(raw, (int, str)):
-                allowed = {raw, "SUM"}
+            raw = self.volume_recombination["particle"].get(species, set())
+            raw2 = self.volume_recombination["energy"].get(species, set())
+            if isinstance(raw, (int, str)) and isinstance(raw2, (int,str)):
+                allowed = {raw, raw2, "SUM"}
             else:
-                allowed = set(raw) | {"SUM"}
+                allowed = set(raw) | {"SUM"} | set(raw2)
         else:
             allowed = set(self.requested_strata)
 
@@ -142,16 +151,8 @@ class StrataAssigner:
         # plasma-plasma special handling
         # -------------------------
         if collision == "plasma-plasma":
-
             # allowed strata for this species
-            allowed = set()
-
-            # volume recombination stratum
-            if species in self.volume_recombination:
-                allowed.update(self.volume_recombination[species])
-
-            # SUM is always allowed
-            allowed.add("SUM")
+            allowed = self._allowed_strata_for_species(species)
 
             # assign in file-order (lowest → highest → SUM)
             for req in self.requested_strata:
@@ -230,6 +231,15 @@ class StrataAssigner:
         self._assert_structure()
         self._validate_schema()
 
+    def _allowed_strata_for_species(self, species):
+        allowed = set()
+        if species in self.volume_recombination["particle"]:
+            allowed.update(self.volume_recombination["particle"][species])
+        if species in self.volume_recombination["energy"]:
+            allowed.update(self.volume_recombination["energy"][species])
+        allowed.add("SUM")
+        return allowed
+
     # ------------------------
     # Helper: sum all collisions
     # ------------------------
@@ -257,7 +267,7 @@ class StrataAssigner:
     # Helper: volume recombination
     # ------------------------
     def _apply_volume_recombination(self, total, Te, Ti, warned_species_strata):
-        vol_attr = self.volume_recombination
+        vol_attr = self.volume_recombination["particle"]
         for mom, coll_dict in self.sources.items():
             for coll, species_dict in coll_dict.items():
                 for species in species_dict:
@@ -273,22 +283,24 @@ class StrataAssigner:
                     # electrons: bulk-ion VR
                     # ------------------------
                     if particle_cls == "ELECTRONS" and mom in {"particle", "energy"}:
-                        self._apply_electron_bulk_vr(mom, coll_dict, total, vol_attr, Te, Ti, warned_species_strata, key_warn, suppress_warning)
+                        self._apply_electron_bulk_vr(mom, coll_dict, total, vol_attr, Te, Ti, species, warned_species_strata, key_warn, suppress_warning)
 
                     # ------------------------
                     # normal species VR
                     # ------------------------
                     if species in vol_attr:
-                        print(vol_attr)
                         self._apply_normal_species_vr(mom, coll_dict, total, species, vol_attr, warned_species_strata, key_warn, suppress_warning)
 
 
     # ------------------------
     # Helper: electron bulk-ion VR
     # ------------------------
-    def _apply_electron_bulk_vr(self, mom, coll_dict, total, vol_attr, Te, Ti, warned_species_strata, key_warn, suppress_warning):
+    def _apply_electron_bulk_vr(self, mom, coll_dict, total, vol_attr, Te, Ti,
+                                el_species, warned_species_strata, key_warn, suppress_warning):
+        # use contracted VR map for energy
+        vr_map = self.volume_recombination[mom]
         # Loop over bulk species and their VR strata sets
-        for bulk_species, bulk_strata_set in vol_attr.items():
+        for bulk_species, bulk_strata_set in vr_map.items():
             for bulk_stratum in bulk_strata_set:
                 included = False
                 for c in coll_dict:
@@ -299,12 +311,14 @@ class StrataAssigner:
                     if bulk_arr is not None:
                         factor = Te/Ti if mom == "energy" else 1.0
                         # Always add to SUM
-                        if total[mom]["e-"]["SUM"] is None:
-                            total[mom]["e-"]["SUM"] = bulk_arr.copy() * factor
+                        if total[mom][el_species]["SUM"] is None:
+                            total[mom][el_species]["SUM"] = bulk_arr.copy() * factor
                         else:
-                            total[mom]["e-"]["SUM"] += bulk_arr * factor
+                            total[mom][el_species]["SUM"] += bulk_arr * factor
                         included = True
-                if not included and key_warn not in warned_species_strata and not suppress_warning:
+                if (not included and key_warn not in warned_species_strata
+                    and not suppress_warning):
+                    pdb.set_trace()
                     print(f"Warning: electron VR from {bulk_species} stratum {bulk_stratum} not found")
                     warned_species_strata.add(key_warn)
 
@@ -330,6 +344,42 @@ class StrataAssigner:
                 print(f"Warning: volume recombination stratum {vol_stratum} for {species} not found")
                 warned_species_strata.add(key_warn)
 
+    def _build_species_to_class(self):
+        """
+        Build runtime species→particle_class mapping.
+        Assumes pseudo-species have already been injected by input parser.
+        """
+        self.species_to_class = {}
+
+        for cls, species_set in self.expected_species_by_particle_class.items():
+            for sp in species_set:
+                if sp in self.species_to_class:
+                    raise ValueError(
+                        f"Species '{sp}' assigned to multiple particle classes: "
+                        f"{self.species_to_class[sp]} and {cls}"
+                    )
+                self.species_to_class[sp] = cls
+
+    def _build_energy_vr_map(self):
+        """
+        Build VR map in energy-species space (contracted species).
+        """
+        energy_vr = defaultdict(set)
+
+        for sp, strata in self.volume_recombination.items():
+            cls = self.species_to_class.get(sp)
+
+            if cls in PSEUDO_SPECIES:   # atoms, molecules, test_ions
+                energy_sp = PSEUDO_SPECIES[cls]
+            else:
+                energy_sp = sp  # bulk_ions, electrons, etc.
+
+            if isinstance(strata, (set, list, tuple)):
+                energy_vr[energy_sp].update(strata)
+            else:
+                energy_vr[energy_sp].add(strata)
+
+        self.energy_volume_recombination = dict(energy_vr)
 
     def _validate_schema(self):
         """
@@ -428,7 +478,7 @@ class StrataAssigner:
         # ---------------------------------
         # volume recombination consistency
         # ---------------------------------
-        for sp, vr in self.volume_recombination.items():
+        for sp, vr in self.volume_recombination["particle"].items():
             found = False
             for m in self.sources:
                 for c in self.sources[m]:
@@ -451,7 +501,7 @@ class StrataAssigner:
             for pc, domain in self.expected_species_by_particle_class.items():
                 print(f"  {pc}: {sorted(domain)}")
             print("Volume recombination mapping:")
-            for sp, stratum in self.volume_recombination.items():
+            for sp, stratum in self.volume_recombination["particle"].items():
                 print(f"  {sp} -> {stratum}")
             print()
 

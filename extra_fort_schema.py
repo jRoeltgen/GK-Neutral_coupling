@@ -23,3 +23,10 @@ PARTICLE_CLASS_MAP = {
     '5': 'bulk_ions',
     '6': 'N/A'
 }
+
+# map from particle class to pseudo species
+PSEUDO_SPECIES = {
+    "atoms": "ATOMS",
+    "molecules": "MOLECULES",
+    "test_ions": "TEST IONS"
+}
