@@ -404,7 +404,6 @@ class eirene:
                 particle_type = extra_fort_schema.PARTICLE_CLASS_MAP[particle_code]
                 loader.ingest(moment, collision_type, particle_type, species,
                               units, current_source)
-                #self.__increment_sources(current_source, current_file.suffix, lines_list[start_line-6:start_line-3])
                 x += 1
                 start_line += add_cells + header_lines + Ncells + 5
 

@@ -318,7 +318,6 @@ class StrataAssigner:
                         included = True
                 if (not included and key_warn not in warned_species_strata
                     and not suppress_warning):
-                    pdb.set_trace()
                     print(f"Warning: electron VR from {bulk_species} stratum {bulk_stratum} not found")
                     warned_species_strata.add(key_warn)
 
