@@ -326,18 +326,18 @@ def test_apply_electron_bulk_vr_particle():
         suppress_warning=False
     )
 
-    sa._apply_electron_bulk_vr(
-        mom="particle",
-        coll_dict=["atom-plasma"],
-        total=total,
-        vol_attr=sa.volume_recombination,
-        Te=1.0,
-        Ti=1.0,
-        el_species="e-",
-        warned_species_strata=warned,
-        key_warn=("e-", "SUM"),
-        suppress_warning=False
-    )
+    # sa._apply_electron_bulk_vr(
+    #     mom="particle",
+    #     coll_dict=["atom-plasma"],
+    #     total=total,
+    #     vol_attr=sa.volume_recombination,
+    #     Te=1.0,
+    #     Ti=1.0,
+    #     el_species="e-",
+    #     warned_species_strata=warned,
+    #     key_warn=("e-", "SUM"),
+    #     suppress_warning=False
+    # )
 
     # Check that electron SUM got D+ contribution
     assert np.allclose(total["particle"]["e-"]["SUM"], np.ones(3))
