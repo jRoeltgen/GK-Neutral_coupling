@@ -14,8 +14,10 @@ COLLISION_MAP = {
     '5': 'N/A'
 }
 
+#Particle class is lower cased
+#Derived/assumed species are all capitalized (e.g. ATOMS)
 PARTICLE_CLASS_MAP = {
-    '0': 'ELECTRONS',
+    '0': 'electrons',
     '1': 'atoms',
     '2': 'molecules',
     '3': 'test_ions',

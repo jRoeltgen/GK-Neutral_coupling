@@ -83,6 +83,8 @@ class StrataAssigner:
         self.units = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
         self.particle_class = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
 
+        self.electron_species = self._resolve_single_species("electrons")
+
     def ingest(self, moment, collision, particle_class, species, units, current_source):
         """
         Ingest a single emission record from fort.* stream.
@@ -151,29 +153,31 @@ class StrataAssigner:
         # plasma-plasma special handling
         # -------------------------
         if collision == "plasma-plasma":
-            # allowed strata for this species
+            # advance group-local index to next allowed stratum
             allowed = self._allowed_strata_for_species(species)
 
-            # assign in file-order (lowest → highest → SUM)
-            for req in self.requested_strata:
-                if req not in allowed:
-                    continue
+            while req_idx < len(self.requested_strata):
+                req = self.requested_strata[req_idx]
+                if req in allowed:
+                    break
+                req_idx += 1
 
-                if req not in self.sources[moment][collision][species]:
-                    self.sources[moment][collision][species][req] = np.zeros_like(current_source)
+            self._group_req_idx[group_key] = req_idx
 
-                if self.sources[moment][collision][species][req].shape != current_source.shape:
-                    raise ValueError(
-                        f"Shape mismatch for {moment}/{collision}/{particle_class}/{species} "
-                        f"stratum {req}: "
-                        f"{self.sources[moment][collision][species][req].shape} vs {current_source.shape}"
-                    )
+            if req_idx >= len(self.requested_strata):
+                return
 
-                self.sources[moment][collision][species][req] += current_source
-                self.units[moment][collision][species][req] = units
-                self.particle_class[moment][collision][species] = particle_class
+            req = self.requested_strata[req_idx]
 
-            return   # do not fall through
+            if req not in self.sources[moment][collision][species]:
+                self.sources[moment][collision][species][req] = np.zeros_like(current_source)
+
+            self.sources[moment][collision][species][req] += current_source
+            self.units[moment][collision][species][req] = units
+            self.particle_class[moment][collision][species] = particle_class
+
+            self._group_req_idx[group_key] += 1
+            return
 
         # initialize
         if req not in self.sources[moment][collision][species]:
@@ -250,7 +254,6 @@ class StrataAssigner:
                     for stratum, arr in strata_dict.items():
                         if stratum == "SUM" and coll == "plasma-plasma":
                             continue
-
                         if total[mom][species][stratum] is None:
                             total[mom][species][stratum] = arr.copy()
                         else:
@@ -267,29 +270,58 @@ class StrataAssigner:
     # Helper: volume recombination
     # ------------------------
     def _apply_volume_recombination(self, total, Te, Ti, warned_species_strata):
+        applied_vr = set()
+        # ------------------------
+        # electrons: bulk-ion VR
+        # ------------------------
+        for mom in {"particle", "energy"}:
+            if "plasma-plasma" in self.sources[mom]:
+                key = ("electron", mom, self.electron_species)
+                if key in applied_vr:
+                    raise RuntimeError(
+                        f"Electron VR applied twice for {mom}"
+                    )
+                applied_vr.add(key)
+                self._apply_electron_bulk_vr(
+                    mom=mom,
+                    coll_dict=self.sources[mom],
+                    total=total,
+                    vol_attr=None,
+                    Te=Te,
+                    Ti=Ti,
+                    el_species=self.electron_species,
+                    warned_species_strata=warned_species_strata,
+                    key_warn=("ELECTRONS", mom),
+                    suppress_warning=False,
+                )
+
+        # ------------------------
+        # normal species VR
+        # ------------------------
         vol_attr = self.volume_recombination["particle"]
         for mom, coll_dict in self.sources.items():
-            for coll, species_dict in coll_dict.items():
-                for species in species_dict:
-                    # Only SUM gets VR
-                    if "SUM" not in total[mom][species]:
-                        continue
+            for species in self.sources[mom].get("plasma-plasma", {}):
+                key = ("normal", mom, species)
+                if key in applied_vr:
+                    raise RuntimeError(
+                        f"VR applied twice for {mom}, {species}"
+                    )
+                applied_vr.add(key)
+                # particle class is independent of collision
+                particle_cls = next(
+                    cls for cls in self.particle_class[mom].values()
+                    if species in cls
+                )[species]
+                suppress_warning = (
+                    (mom == "momentum")
+                    or (particle_cls in {"molecules", "test_ions", "photons"}))
+                key_warn = (species, "SUM")
 
-                    particle_cls = self.particle_class[mom][coll][species]
-                    suppress_warning = (mom == "momentum") or (particle_cls in {"molecules", "test_ions", "photons"})
-                    key_warn = (species, "SUM")
-
-                    # ------------------------
-                    # electrons: bulk-ion VR
-                    # ------------------------
-                    if particle_cls == "ELECTRONS" and mom in {"particle", "energy"}:
-                        self._apply_electron_bulk_vr(mom, coll_dict, total, vol_attr, Te, Ti, species, warned_species_strata, key_warn, suppress_warning)
-
-                    # ------------------------
-                    # normal species VR
-                    # ------------------------
-                    if species in vol_attr:
-                        self._apply_normal_species_vr(mom, coll_dict, total, species, vol_attr, warned_species_strata, key_warn, suppress_warning)
+                if species in vol_attr:
+                    self._apply_normal_species_vr(mom, coll_dict, total,
+                                                  species, vol_attr,
+                                                  warned_species_strata,
+                                                  key_warn, suppress_warning)
 
 
     # ------------------------
@@ -330,7 +362,7 @@ class StrataAssigner:
         for vol_stratum in vol_attr[species]:
             included = False
             for c in coll_dict:
-                if c == "plasma-plasma":
+                if c != "plasma-plasma":
                     continue
                 arr = self.sources[mom][c].get(species, {}).get(vol_stratum)
                 if arr is not None:
@@ -599,3 +631,12 @@ class StrataAssigner:
             f"allowed_strata={sorted(allowed_strata, key=lambda x: str(x))}"
             + (f" | unexpected: {', '.join(mismatches)}" if mismatches else "")
         )
+
+    def _resolve_single_species(self, cls: str) -> str:
+        species = self.expected_species_by_particle_class.get(cls, [])
+        if len(species) != 1:
+            raise ValueError(
+                f"Expected exactly one species for particle class '{cls}', "
+                f"found {species}"
+            )
+        return next(iter(species))
