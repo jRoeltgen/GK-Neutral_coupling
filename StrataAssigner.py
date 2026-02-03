@@ -85,7 +85,7 @@ class StrataAssigner:
 
         self.electron_species = self._resolve_single_species("electrons")
 
-    def ingest(self, moment, collision, particle_class, species, units, current_source):
+    def ingest(self, moment, collision, particle_class, species, units, current_source, debug=False):
         """
         Ingest a single emission record from fort.* stream.
 
@@ -97,6 +97,7 @@ class StrataAssigner:
         species : str
         units : str
         current_source : np.ndarray
+        debug : bool (allows debugging a single ingest call)
         """
         # --- Handle "N/A" entries first ---
         if moment == "N/A" or collision == "N/A" or particle_class == "N/A":
@@ -145,7 +146,7 @@ class StrataAssigner:
         req = self.requested_strata[req_idx]
 
 
-        if self.debug:
+        if self.debug or debug:
             self._debug_record(moment, collision, particle_class, species, req, allowed)
 
 
@@ -509,18 +510,19 @@ class StrataAssigner:
         # ---------------------------------
         # volume recombination consistency
         # ---------------------------------
-        for sp, vr in self.volume_recombination["particle"].items():
-            found = False
-            for m in self.sources:
-                for c in self.sources[m]:
-                    if sp in self.sources[m][c]:
-                        found = True
-                        break
+        for key in self.volume_recombination.keys():
+            for sp, vr in self.volume_recombination[key].items():
+                found = False
+                for m in self.sources:
+                    for c in self.sources[m]:
+                        if sp in self.sources[m][c]:
+                            found = True
+                            break
 
-            if not found:
-                warnings.append(
-                    f"Volume recombination species '{sp}' not present in sources"
-                )
+                if not found:
+                    warnings.append(
+                        f"Volume recombination ({key}) species '{sp}' not present in sources"
+                    )
 
         # ----------------------
         # print debug summary if there are any warnings/errors
@@ -531,8 +533,11 @@ class StrataAssigner:
             print("Expected species per particle class:")
             for pc, domain in self.expected_species_by_particle_class.items():
                 print(f"  {pc}: {sorted(domain)}")
-            print("Volume recombination mapping:")
+            print("Volume recombination mapping (particle):")
             for sp, stratum in self.volume_recombination["particle"].items():
+                print(f"  {sp} -> {stratum}")
+            print("Volume recombination mapping (energy):")
+            for sp, stratum in self.volume_recombination["energy"].items():
                 print(f"  {sp} -> {stratum}")
             print()
 
@@ -603,8 +608,6 @@ class StrataAssigner:
                             )
 
     def _debug_record(self, moment, collision, particle_class, species, stratum, allowed_strata):
-        if not getattr(self, "debug", False):
-            return
 
         # -------- species validation --------
         species_expected = any(
