@@ -187,7 +187,6 @@ def test_VR_only_adds_to_SUM():
         vol_rec={
             "particle":{
                 "D+": {21},
-                "T+": {22},
             },"energy":{}
         }
     )
@@ -510,7 +509,8 @@ def test_full_set_of_parameters():
                "electrons": ["ELECTRONS"]}
     vol_rec = {"particle": {"D" :11,
                            "D+":11},
-                "energy" : {"ATOMS":11}}
+                "energy" : {"ATOMS":11,
+                            "D+": 11}}
 
     sa = StrataAssigner(req_strata, species, vol_rec)
     # Reorder req_strata
@@ -568,7 +568,7 @@ def test_full_set_of_parameters():
                     for idx, strata in enumerate(req_strata):
                         if (mom, coll, pclass, strata) in sEXCLUDE:
                             continue
-                        print(units,"/",sp,"/",strata,"/",debug)
+                        #print(units,"/",sp,"/",strata,"/",debug)
                         arr = np.array((mom_key,coll_key,pclass_key,sp_key, idx), dtype=float)
                         sa.ingest(mom, coll, pclass, sp, units, arr, debug=debug)
                         values[mom][coll][sp][strata] = arr
@@ -577,12 +577,63 @@ def test_full_set_of_parameters():
     sa.finalize()
     # Check number of keys
     assert len(values2.keys()) == 32
-    # Check read in properly
+
+    ##### Check read in properly #####
     for mom, coll_dict in values.items():
         for coll, species_dict in coll_dict.items():
             for species, strata_dict in species_dict.items():
                 for stratum, expected in strata_dict.items():
                     found = sa.sources[mom][coll][species][stratum]
                     assert np.allclose(expected, found)
-    # Check sum
-    sa.sum_over_collisions()
+
+    ##### Check sums #####
+    Te = 3
+    Ti = 2
+    factor = Te/Ti
+    total = sa.sum_over_collisions(Te=Te, Ti=Ti)
+
+    # Check momentum "SUM" (205,215,225)
+    expected = np.array((6, 3, 15, 0, 3))
+    found = total["momentum"]["D+"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check "SUM" without volume recombination (112)
+    expected = np.array((1, 1, 2, 0, 1))
+    found = total["particle"]["D2"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check non-electron "SUM" with (particle) vol. recombination
+    # (105, 115, 125, 145)
+    expected = np.array((4, 7, 20, 0, 3))
+    found = total["particle"]["D+"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check electron "SUM" with (particle) vol. recombination
+    # (100, 110, 120, 145)
+    expected = np.array((4, 7, 5, 0, 3))
+    found = total["particle"]["ELECTRONS"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check non-electron/"real particle" "SUM" with (energy) vol. recombination
+    # (305, 315, 325, 345)
+    expected = np.array((12, 7, 20, 0, 3))
+    found = total["energy"]["D+"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check non-electron/"pseudo particle" "SUM" with (energy) vol. recombination
+    # (301, 311, 321, 341)
+    expected = np.array((12, 7, 4, 4, 3))
+    found = total["energy"]["ATOMS"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check electron "SUM" with (energy) vol. recombination
+    # (300, 310, 320, 2*345)
+    expected = np.array((9+factor*3, 3+factor*4, factor*5, 0, 3))
+    found = total["energy"]["ELECTRONS"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check non-"SUM" strata (i.e. strata 11)
+        # (105, 115, 125, 145)
+    expected = np.array((4, 7, 20, 0, 0))
+    found = total["particle"]["D+"][11]
+    assert np.allclose(expected, found)

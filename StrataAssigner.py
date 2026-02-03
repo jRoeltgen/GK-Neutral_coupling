@@ -20,16 +20,14 @@ class StrataAssigner:
     Data model after assignment:
       sources[moment][collision][stratum_request][species] = array
     """
-    default_species = {"atoms"    : ["D"],
-                       "molecules": ["D2"],
-                       "test_ions": ["D2+"],
+    default_species = {"atoms"    : ["D", "ATOMS"],
+                       "molecules": ["D2", "MOLECULES"],
+                       "test_ions": ["D2+", "TEST IONS"],
                        "bulk_ions": ["D+"],
                        "electrons": ["ELECTRONS"]
                        }
     default_strata = "SUM"
-    DN_default_vol_rec = {"D+"        : 11,
-                          "D"         : 11
-                         }
+    DN_default_vol_rec = {} # See unit test for example
 
     def __init__(self, requested_strata = default_strata,
                  expected_species_by_particle_class = default_species,
@@ -82,6 +80,7 @@ class StrataAssigner:
         self.sources = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
         self.units = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
         self.particle_class = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+        self.contract_part_class = {}
 
         self.electron_species = self._resolve_single_species("electrons")
 
@@ -283,6 +282,8 @@ class StrataAssigner:
                         f"Electron VR applied twice for {mom}"
                     )
                 applied_vr.add(key)
+                if mom == "particle":
+                    print("")
                 self._apply_electron_bulk_vr(
                     mom=mom,
                     coll_dict=self.sources[mom],
@@ -299,8 +300,10 @@ class StrataAssigner:
         # ------------------------
         # normal species VR
         # ------------------------
-        vol_attr = self.volume_recombination["particle"]
         for mom, coll_dict in self.sources.items():
+            if mom=="momentum":
+                continue
+            vol_attr = self.volume_recombination[mom]
             for species in self.sources[mom].get("plasma-plasma", {}):
                 key = ("normal", mom, species)
                 if key in applied_vr:
@@ -330,14 +333,18 @@ class StrataAssigner:
     # ------------------------
     def _apply_electron_bulk_vr(self, mom, coll_dict, total, vol_attr, Te, Ti,
                                 el_species, warned_species_strata, key_warn, suppress_warning):
-        # use contracted VR map for energy
+        # Get volume recombination
         vr_map = self.volume_recombination[mom]
         # Loop over bulk species and their VR strata sets
         for bulk_species, bulk_strata_set in vr_map.items():
+            my_suppress_warning = suppress_warning
             for bulk_stratum in bulk_strata_set:
                 included = False
                 for c in coll_dict:
                     if c != "plasma-plasma":
+                        continue
+                    if self.particle_class[mom][c][bulk_species] != "bulk_ions":
+                        my_suppress_warning = True
                         continue
                     # bulk_arr is the array for this species, stratum, collision
                     bulk_arr = self.sources[mom][c].get(bulk_species, {}).get(bulk_stratum)
@@ -350,7 +357,7 @@ class StrataAssigner:
                             total[mom][el_species]["SUM"] += bulk_arr * factor
                         included = True
                 if (not included and key_warn not in warned_species_strata
-                    and not suppress_warning):
+                    and not my_suppress_warning):
                     print(f"Warning: electron VR from {bulk_species} stratum {bulk_stratum} not found")
                     warned_species_strata.add(key_warn)
 
