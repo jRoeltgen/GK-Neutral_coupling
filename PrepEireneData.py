@@ -9,7 +9,7 @@ ion = "D+"
 molecule = "D2+"
 # read fort.44 and fort.46 from given director ("./")
 # read fort.33, fort.34, and fort.35 from given director ("./")
-eirene_data_path = "./step_full_device_D+D2/gkeyll_w_2D2/"
+eirene_data_path = "./step_full_device_D+D2_walled_off/gkeyll_w_2D2/"
 edat = eirene.eirene(eirene_data_path)
 edat.load_extra_forts(eirene_data_path)
 edat.triangle_mesh.calc_incenter()
@@ -22,15 +22,17 @@ mass_elc = 9.11e-31
 mass_molecule = mass_ion*2.0
 eV = 1.602e-19
 
-pisource = edat.particle_source[ion]
-misource = edat.momentum_source[ion]
-eisource = edat.energy_source[ion]
-pesource = edat.particle_source["ELECTRONS"]
+pisource = edat.sources["particle"][ion]["SUM"]
+misource = edat.sources["momentum"][ion]["SUM"]
+eisource = edat.sources["energy"][ion]["SUM"]
+
+pesource = edat.sources["particle"]["ELECTRONS"]["SUM"]
 mesource = 0.0
-eesource = edat.energy_source["ELECTRONS"]
-pmsource = edat.particle_source[molecule]
+eesource = edat.sources["energy"]["ELECTRONS"]["SUM"]
+
+pmsource = edat.sources["particle"][molecule]["SUM"]
 mmsource = 0.0
-emsource = edat.energy_source['TEST IONS']
+emsource = edat.sources["energy"]["TEST IONS"]["SUM"]
 
 # Step 1: load the Gkeyll grid information
 #     same as process_eirene_output.py's Step 1
@@ -98,7 +100,7 @@ for i, simName in enumerate(simNames):
             M0m[ix,iz] = pmsource[linidx]/eV*1e6
 
             # M1 source calculation
-            M1i[ix,iz] = misource[linidx]*10/mass_ion/eV
+            M1i[ix,iz] = 0.0 #misource[linidx]*10/mass_ion/eV
             M1e[ix,iz] = 0.0 
             M1m[ix,iz] = 0.0 
 
