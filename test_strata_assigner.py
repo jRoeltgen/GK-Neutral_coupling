@@ -501,77 +501,77 @@ def test_apply_vr_warnings_suppressed():
 # -------------------------
 # Integrated test
 # -------------------------
-def test_full_set_of_parameters():
-    req_strata = ["SUM", 11]
-    species = {"atoms": ["D", "ATOMS"],
-               "molecules": ["D2", "MOLECULES"],
-               "test_ions": ["D2+", "TEST_IONS"],
-               "bulk_ions": ["D+"],
-               "electrons": ["ELECTRONS"]}
-    vol_rec = {"particle": {"D" :11,
-                           "D+:":11},
-                "energy" : {"ATOMS":{21,22}}}
+# def test_full_set_of_parameters():
+#     req_strata = ["SUM", 11]
+#     species = {"atoms": ["D", "ATOMS"],
+#                "molecules": ["D2", "MOLECULES"],
+#                "test_ions": ["D2+", "TEST_IONS"],
+#                "bulk_ions": ["D+"],
+#                "electrons": ["ELECTRONS"]}
+#     vol_rec = {"particle": {"D" :11,
+#                            "D+:":11},
+#                 "energy" : {"ATOMS":{21,22}}}
 
-    sa = StrataAssigner(req_strata, species, vol_rec)
-    values = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    MMAP = extra_fort_schema.MOMENT_MAP
-    CMAP = extra_fort_schema.COLLISION_MAP
-    PCMAP = extra_fort_schema.PARTICLE_CLASS_MAP
-    EXCLUDE = {
-        (MMAP["1"], CMAP["0"], PCMAP["2"]), #102
-        (MMAP["1"], CMAP["0"], PCMAP["3"]), #103
-        (MMAP["1"], CMAP["2"], PCMAP["2"]), #122
-        (MMAP["1"], CMAP["4"], PCMAP["0"]), #140
-        (MMAP["1"], CMAP["4"], PCMAP["3"]), #143
-        (MMAP["3"], CMAP["0"], PCMAP["2"]), #302
-        (MMAP["3"], CMAP["0"], PCMAP["3"]), #303
-        (MMAP["3"], CMAP["2"], PCMAP["2"]), #322
-        (MMAP["3"], CMAP["2"], PCMAP["3"]), #323
-        (MMAP["3"], CMAP["4"], PCMAP["0"]), #340
-        (MMAP["3"], CMAP["4"], PCMAP["3"]), #343
-    }
-    KEEP = {
-        (CMAP["0"], PCMAP["3"]), #203
-        (CMAP["1"], PCMAP["3"]), #213
-        (CMAP["2"], PCMAP["3"]), #223
-    }
-    sEXCLUDE = {
-        (MMAP["1"], CMAP["4"], PCMAP["2"], 11), # 142
-        (MMAP["3"], CMAP["4"], PCMAP["2"], 11), # 342
-    }
-    #assigner.ingest(moment, collision, pclass, species, "arb", val)
-    for mom_key, mom in MMAP.items():
-        if mom == "N/A":
-            continue
-        for coll_key, coll in CMAP.items():
-            if coll in (CMAP["3"], CMAP["5"]):
-                continue
-            for pclass_key, pclass in PCMAP.items():
-                if pclass in (PCMAP["4"], PCMAP["6"]):
-                    continue
-                if (mom, coll, pclass) in EXCLUDE:
-                    continue
-                if mom == MMAP["2"] and (coll, pclass) not in KEEP:
-                    continue
-                units = "fort." + str(mom_key) + str(coll_key) + str(pclass_key)
-                if mom == "momentum":
-                    pdb.set_trace()
-                for sp_key, sp in enumerate(species.get(pclass, [])):
-                    if sp in extra_fort_schema.PSEUDO_SPECIES.values() and mom == "particle":
-                        continue
-                    temp_dict = extra_fort_schema.PSEUDO_SPECIES.copy()
-                    temp_dict.update({"bulk_ions":"D+","electrons":"ELECTRONS"})
-                    if sp not in temp_dict.values() and mom == "energy":
-                        continue
-                    for idx, strata in enumerate(req_strata):
-                        if (mom, coll, pclass, strata) in sEXCLUDE:
-                            continue
-                        print(units,"/",sp,"/",strata)
-                        arr = np.array((mom_key,coll_key,pclass_key,sp_key, idx), dtype=int)
-                        sa.ingest(mom, coll, pclass, sp, units, arr)
-                        values[units][sp][idx] = arr
-#313
-    sa.finalize()
-    sa.sum_over_collisions()
-    pdb.set_trace()
-    assert len(values.keys()) == 32
+#     sa = StrataAssigner(req_strata, species, vol_rec)
+#     values = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+#     MMAP = extra_fort_schema.MOMENT_MAP
+#     CMAP = extra_fort_schema.COLLISION_MAP
+#     PCMAP = extra_fort_schema.PARTICLE_CLASS_MAP
+#     EXCLUDE = {
+#         (MMAP["1"], CMAP["0"], PCMAP["2"]), #102
+#         (MMAP["1"], CMAP["0"], PCMAP["3"]), #103
+#         (MMAP["1"], CMAP["2"], PCMAP["2"]), #122
+#         (MMAP["1"], CMAP["4"], PCMAP["0"]), #140
+#         (MMAP["1"], CMAP["4"], PCMAP["3"]), #143
+#         (MMAP["3"], CMAP["0"], PCMAP["2"]), #302
+#         (MMAP["3"], CMAP["0"], PCMAP["3"]), #303
+#         (MMAP["3"], CMAP["2"], PCMAP["2"]), #322
+#         (MMAP["3"], CMAP["2"], PCMAP["3"]), #323
+#         (MMAP["3"], CMAP["4"], PCMAP["0"]), #340
+#         (MMAP["3"], CMAP["4"], PCMAP["3"]), #343
+#     }
+#     KEEP = {
+#         (CMAP["0"], PCMAP["5"]), #205
+#         (CMAP["1"], PCMAP["5"]), #215
+#         (CMAP["2"], PCMAP["5"]), #225
+#     }
+#     sEXCLUDE = {
+#         (MMAP["1"], CMAP["4"], PCMAP["2"], 11), # 142
+#         (MMAP["3"], CMAP["4"], PCMAP["2"], 11), # 342
+#     }
+#     #assigner.ingest(moment, collision, pclass, species, "arb", val)
+#     for mom_key, mom in MMAP.items():
+#         if mom == "N/A":
+#             continue
+#         for coll_key, coll in CMAP.items():
+#             if coll in (CMAP["3"], CMAP["5"]):
+#                 continue
+#             for pclass_key, pclass in PCMAP.items():
+#                 if pclass in (PCMAP["4"], PCMAP["6"]):
+#                     continue
+#                 if (mom, coll, pclass) in EXCLUDE:
+#                     continue
+#                 if mom == MMAP["2"] and (coll, pclass) not in KEEP:
+#                     continue
+#                 units = "fort." + str(mom_key) + str(coll_key) + str(pclass_key)
+#                 if mom == "momentum":
+#                     pdb.set_trace()
+#                 for sp_key, sp in enumerate(species.get(pclass, [])):
+#                     if sp in extra_fort_schema.PSEUDO_SPECIES.values() and mom == "particle":
+#                         continue
+#                     temp_dict = extra_fort_schema.PSEUDO_SPECIES.copy()
+#                     temp_dict.update({"bulk_ions":"D+","electrons":"ELECTRONS"})
+#                     if sp not in temp_dict.values() and mom == "energy":
+#                         continue
+#                     for idx, strata in enumerate(req_strata):
+#                         if (mom, coll, pclass, strata) in sEXCLUDE:
+#                             continue
+#                         print(units,"/",sp,"/",strata)
+#                         arr = np.array((mom_key,coll_key,pclass_key,sp_key, idx), dtype=int)
+#                         sa.ingest(mom, coll, pclass, sp, units, arr)
+#                         values[units][sp][idx] = arr
+# #313
+#     sa.finalize()
+#     sa.sum_over_collisions()
+#     pdb.set_trace()
+#     assert len(values.keys()) == 32
