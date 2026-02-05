@@ -46,20 +46,14 @@ Zlist = []
 nodal_grid_list = []
 jlist = []
 for i, simName in enumerate(simNames):
-    data = pg.GData(simName+"-nodes.gkyl")
+    data = pg.GData(simName+"-nodesint.gkyl")
     vals = data.get_values()
     R = vals[:,:,0]
     Z = vals[:,:,1]
     phi = vals[:,:,2]
-    temp_nodal_grid = data.get_grid()
-    # This nodal grid is the true (psi,theta) coords
-    nodal_grid = []
-    for d in range(0,len(temp_nodal_grid)):
-        nodal_grid.append( np.linspace(temp_nodal_grid[d][0], temp_nodal_grid[d][-1], len(temp_nodal_grid[d])-1) )
     
     Rlist.append(R)
     Zlist.append(Z)
-    nodal_grid_list.append(nodal_grid)
 
 
 # Step 2: Fill Nodal Gkeyll data by finding closest point from Eirene
