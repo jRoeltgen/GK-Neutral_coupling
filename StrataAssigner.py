@@ -2,6 +2,7 @@ from collections import defaultdict
 import EireneInputParser
 from extra_fort_schema import PSEUDO_SPECIES
 from colorama import Fore, Style
+from copy import deepcopy
 import numpy as np
 import pdb
 
@@ -228,12 +229,14 @@ class StrataAssigner:
 
         return total
 
-    def finalize(self):
+    def finalize(self, collisions_to_adjust=None, species_patt_to_ignore="",
+                 print_info = False):
         """
         Validation hook after ingestion.
         """
         self._assert_structure()
-        self._validate_schema()
+        self._collapse_incomplete_strata_to_sum(collisions_to_adjust, print_info)
+        self._validate_schema(species_patt_to_ignore)
 
     def _allowed_strata_for_species(self, species):
         allowed = set()
@@ -420,7 +423,112 @@ class StrataAssigner:
 
         self.energy_volume_recombination = dict(energy_vr)
 
-    def _validate_schema(self):
+    def _collapse_incomplete_strata_to_sum(self, collisions_to_adjust = None,
+                                           print_info = True):
+        """
+        Repair incomplete strata output by EIRENE when zero-valued strata
+        are suppressed.
+
+        Assumptions (explicitly enforced):
+        1. SUM is always printed by EIRENE.
+        2. Printed strata appear in the same order as requested_strata.
+        3. If observed_count < expected_count, the *last* observed array
+            corresponds to SUM.
+        4. Non-SUM strata are not reliable when suppression occurs and
+            will be marked as NaN.
+
+        This function:
+        - Preserves original sources in self.original_sources
+        - Rewrites affected strata dictionaries so that:
+            * SUM is correct
+            * All other expected strata exist but are NaN
+        """
+
+        if not collisions_to_adjust:
+            return
+
+        # Preserve original data for debugging / auditing
+        self.original_sources = deepcopy(self.sources)
+
+        expected = list(self.requested_strata)
+
+        if "SUM" not in expected:
+            raise RuntimeError(
+                "Invariant violated: requested_strata does not contain 'SUM'"
+            )
+
+        if ("plasma-plasma" in collisions_to_adjust and
+            any(self.volume_recombination[type].values())):
+            raise RuntimeError(
+                "Adjustment of plasma-plasma sources undefined if volume recombination strata requested"
+            )
+
+        adjusted = False
+        for mom, coll_dict in self.sources.items():
+            for coll, species_dict in coll_dict.items():
+
+                if coll not in collisions_to_adjust:
+                    continue
+
+                for species, strata_dict in species_dict.items():
+
+                    observed_keys = list(strata_dict.keys())
+                    observed_count = len(observed_keys)
+                    expected_count = len(expected)
+
+                    if observed_count == expected_count:
+                        continue  # complete, nothing to do
+
+                    if observed_count > expected_count:
+                        print(
+                            f"[WARNING] {mom}/{coll}/{species}: "
+                            f"observed more strata ({observed_count}) than expected "
+                            f"({expected_count}); skipping adjustment."
+                        )
+                        continue
+
+                    if observed_count == 0:
+                        print(
+                            f"[WARNING] {mom}/{coll}/{species}: "
+                            f"no strata observed; skipping adjustment."
+                        )
+                        continue
+
+                    # --- Core assumption: last observed array is SUM ---
+                    sum_array = strata_dict[observed_keys[-1]]
+
+                    # Sanity check: shape reference
+                    template = sum_array
+
+                    # Build new strata dictionary
+                    new_strata = {}
+
+                    for stratum in expected:
+                        if stratum == "SUM":
+                            new_strata["SUM"] = sum_array
+                        else:
+                            new_strata[stratum] = np.full_like(template, np.nan)
+
+                    self.sources[mom][coll][species] = new_strata
+
+                    adjusted = True
+                    if print_info:
+                        print(
+                            f"[INFO] {mom}/{coll}/{species}: "
+                            f"incomplete strata detected "
+                            f"({observed_count}/{expected_count}). "
+                            f"Assumed last observed entry is SUM; "
+                            f"non-SUM strata set to NaN."
+                        )
+        if adjusted:
+            print(
+                f"[WARNING] An incomplete strata was observed.\n"
+                f"Assumed last observed entry is SUM and set remaining to NaN.\n"
+                f"Original sources saved in self.original_sources.\n"
+            )
+
+
+    def _validate_schema(self, species_patt_to_ignore=""):
         """
         Full structural + physical validation.
 
@@ -502,6 +610,8 @@ class StrataAssigner:
         for moment, m_map in self.sources.items():
             for collision, c_map in m_map.items():
                 for species in c_map.keys():
+                    if self._contains_any(species_patt_to_ignore, species):
+                        continue
                     found = False
                     for domain in self.expected_species_by_particle_class.values():
                         if species in domain:
@@ -650,3 +760,13 @@ class StrataAssigner:
                 f"found {species}"
             )
         return next(iter(species))
+
+    def _contains_any(self, x, s):
+        if isinstance(x, str):
+            candidates = [x]
+        elif isinstance(x, (list, tuple)):
+            candidates = x
+        else:
+            raise TypeError("x must be a string or list of strings")
+
+        return any(sub in s for sub in candidates)

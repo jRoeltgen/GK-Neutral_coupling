@@ -10,6 +10,9 @@ from pathlib import Path
 # for debugging
 import pdb
 
+default_coll_to_adjust = {}
+default_coll_to_adjust["testion-plasma"] = True
+
 class eirene:
     def __init__(self, filepath=None):
         version = platform.python_version()
@@ -359,9 +362,26 @@ class eirene:
     #       0 - atom-plasma; 1 - molecule-plasma; 2 - test ion-plasma; 3 - photon-plasma
     #    Third index is the source "species"
     #       0 - Electrons; 1 - Atoms; 2 - Molecules; 3 - Bulk Ions; 4 - Test ions
+    #
+    #    Arguments:
+    #       eirene_path: Path to source files with names fort.extension
+    #       extension: Extension pattern for source files - might break for non defaults
+    #    The following 3 are only used if input.dat is not in the eirene_path.
+    #    They default to the uinp defaults for a D+ only run.
+    #       requested_strata: this is a dictionary containing the strata expected
+    #       expected_species: this is a dictionary containing the species expected
+    #       requested_strata: this is a dictionary containing the strata expected
+    #       debug: Print the debug output of StrataAssigner (a line per strata/file)
+    #       coll_to_adjust: collision types to move strata labels for if necessary
+    #                       see collapse_incomplete_strata_to_sum for details
+    #       print_info: print extra information in collapse_incomplete_strata_to_sum
+    #       species_patt_to_ignore: species with this pattern are ignored in validation
+    #                       For use in the case of "fake" eirene species.
     def load_extra_forts(self, eirene_path, extension="???",
                          requested_strata=None, expected_species=None,
-                         vol_rec_mapping=None, debug=False):
+                         vol_rec_mapping=None, debug=False,
+                         coll_to_adjust=default_coll_to_adjust, print_info=False,
+                         species_patt_to_ignore=">"):
         if isinstance(eirene_path, str):
             eirene_path = Path(eirene_path)
         filelist = eirene_path.glob("fort."+extension)
@@ -410,7 +430,8 @@ class eirene:
         if not file_read:
             raise Exception("No sources read.")
 
-        loader.finalize()
+        loader.finalize(coll_to_adjust, species_patt_to_ignore, print_info)
+
         self.loaded_sources = loader
         self.sources = loader.sum_over_collisions()
 

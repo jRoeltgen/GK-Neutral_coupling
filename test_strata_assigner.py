@@ -543,6 +543,7 @@ def test_full_set_of_parameters():
         (MMAP["3"], CMAP["4"], PCMAP["2"], 11), # 342
     }
     #assigner.ingest(moment, collision, pclass, species, "arb", val)
+    debug = True
     for mom_key, mom in MMAP.items():
         if mom == "N/A":
             continue
@@ -550,7 +551,7 @@ def test_full_set_of_parameters():
             if coll in (CMAP["3"], CMAP["5"]):
                 continue
             for pclass_key, pclass in PCMAP.items():
-                debug = False
+
                 if pclass in (PCMAP["4"], PCMAP["6"]):
                     continue
                 if (mom, coll, pclass) in EXCLUDE:
@@ -568,7 +569,6 @@ def test_full_set_of_parameters():
                     for idx, strata in enumerate(req_strata):
                         if (mom, coll, pclass, strata) in sEXCLUDE:
                             continue
-                        #print(units,"/",sp,"/",strata,"/",debug)
                         arr = np.array((mom_key,coll_key,pclass_key,sp_key, idx), dtype=float)
                         sa.ingest(mom, coll, pclass, sp, units, arr, debug=debug)
                         values[mom][coll][sp][strata] = arr
@@ -636,4 +636,137 @@ def test_full_set_of_parameters():
         # (105, 115, 125, 145)
     expected = np.array((4, 7, 20, 0, 0))
     found = total["particle"]["D+"][11]
+    assert np.allclose(expected, found)
+
+# -------------------------
+# Integrated test
+# -------------------------
+def test_source_restructure():
+    req_strata = ["SUM", 11]
+    species = {"atoms": ["D", "ATOMS"],
+            "molecules": ["D2", "MOLECULES"],
+            "test_ions": ["D2+", "TEST IONS"],
+            "bulk_ions": ["D+"],
+            "electrons": ["ELECTRONS"]}
+    vol_rec = {"particle": {"D" :11,
+                        "D+":11},
+                "energy" : {"ATOMS":11,
+                            "D+": 11}}
+
+    sa = StrataAssigner(req_strata, species, vol_rec)
+    # Reorder req_strata
+    req_strata = [11, "SUM"]
+    values = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
+    MMAP = extra_fort_schema.MOMENT_MAP
+    CMAP = extra_fort_schema.COLLISION_MAP
+    PCMAP = extra_fort_schema.PARTICLE_CLASS_MAP
+    EXCLUDE = {
+        (MMAP["1"], CMAP["0"], PCMAP["2"]), #102
+        (MMAP["1"], CMAP["0"], PCMAP["3"]), #103
+        (MMAP["1"], CMAP["2"], PCMAP["2"]), #122
+        (MMAP["1"], CMAP["4"], PCMAP["0"]), #140
+        (MMAP["1"], CMAP["4"], PCMAP["3"]), #143
+        (MMAP["3"], CMAP["0"], PCMAP["2"]), #302
+        (MMAP["3"], CMAP["0"], PCMAP["3"]), #303
+        (MMAP["3"], CMAP["2"], PCMAP["2"]), #322
+        (MMAP["3"], CMAP["2"], PCMAP["3"]), #323
+        (MMAP["3"], CMAP["4"], PCMAP["0"]), #340
+        (MMAP["3"], CMAP["4"], PCMAP["3"]), #343
+    }
+    KEEP = {
+        (CMAP["0"], PCMAP["5"]), #205
+        (CMAP["1"], PCMAP["5"]), #215
+        (CMAP["2"], PCMAP["5"]), #225
+    }
+    sEXCLUDE = {
+        (MMAP["1"], CMAP["4"], PCMAP["2"], 11), # 142
+        (MMAP["3"], CMAP["4"], PCMAP["2"], 11), # 342
+        (MMAP["1"], CMAP["2"], PCMAP["0"], 11), # 120 "normally should print"
+    }
+    #assigner.ingest(moment, collision, pclass, species, "arb", val)
+    debug = True
+    for mom_key, mom in MMAP.items():
+        if mom == "N/A":
+            continue
+        for coll_key, coll in CMAP.items():
+            if coll in (CMAP["3"], CMAP["5"]):
+                continue
+            for pclass_key, pclass in PCMAP.items():
+                if pclass in (PCMAP["4"], PCMAP["6"]):
+                    continue
+                if (mom, coll, pclass) in EXCLUDE:
+                    continue
+                if mom == MMAP["2"] and (coll, pclass) not in KEEP:
+                    continue
+                units = "fort." + str(mom_key) + str(coll_key) + str(pclass_key)
+                for sp_key, sp in enumerate(species.get(pclass, [])):
+                    if sp in extra_fort_schema.PSEUDO_SPECIES.values() and mom == "particle":
+                        continue
+                    temp_dict = extra_fort_schema.PSEUDO_SPECIES.copy()
+                    temp_dict.update({"bulk_ions":"D+","electrons":"ELECTRONS"})
+                    if sp not in temp_dict.values() and mom == "energy":
+                        continue
+                    for idx, strata in enumerate(req_strata):
+                        if (mom, coll, pclass, strata) in sEXCLUDE:
+                            continue
+                        arr = np.array((mom_key,coll_key,pclass_key,sp_key, idx), dtype=float)
+                        sa.ingest(mom, coll, pclass, sp, units, arr, debug=debug)
+                        values[mom][coll][sp][strata] = arr
+
+    default_coll_to_adjust = {}
+    default_coll_to_adjust["testion-plasma"] = True
+    sa.finalize(collisions_to_adjust=default_coll_to_adjust, print_info=True)
+
+    ##### Check read in properly #####
+    for mom, coll_dict in values.items():
+        for coll, species_dict in coll_dict.items():
+            for species, strata_dict in species_dict.items():
+                for stratum, expected in strata_dict.items():
+                    found = sa.sources[mom][coll][species][stratum]
+                    assert np.allclose(expected, found)
+
+    ##### Check sums #####
+    Te = 3
+    Ti = 2
+    factor = Te/Ti
+    total = sa.sum_over_collisions(Te=Te, Ti=Ti)
+
+    # Check momentum "SUM" (205,215,225)
+    expected = np.array((6, 3, 15, 0, 3))
+    found = total["momentum"]["D+"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check "SUM" without volume recombination (112)
+    expected = np.array((1, 1, 2, 0, 1))
+    found = total["particle"]["D2"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check non-electron "SUM" with (particle) vol. recombination
+    # (105, 115, 125, 145)
+    expected = np.array((4, 7, 20, 0, 3))
+    found = total["particle"]["D+"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check electron "SUM" with (particle) vol. recombination
+    # (100, 110, 120, 145)
+    expected = np.array((4, 7, 5, 0, 3))
+    found = total["particle"]["ELECTRONS"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check non-electron/"real particle" "SUM" with (energy) vol. recombination
+    # (305, 315, 325, 345)
+    expected = np.array((12, 7, 20, 0, 3))
+    found = total["energy"]["D+"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check non-electron/"pseudo particle" "SUM" with (energy) vol. recombination
+    # (301, 311, 321, 341)
+    expected = np.array((12, 7, 4, 4, 3))
+    found = total["energy"]["ATOMS"]["SUM"]
+    assert np.allclose(expected, found)
+
+    # Check electron "SUM" with (energy) vol. recombination
+    # (300, 310, 320, 2*345)
+    expected = np.array((9+factor*3, 3+factor*4, factor*5, 0, 3))
+    found = total["energy"]["ELECTRONS"]["SUM"]
     assert np.allclose(expected, found)
