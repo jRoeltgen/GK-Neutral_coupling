@@ -13,6 +13,13 @@ import pdb
 default_coll_to_adjust = {}
 default_coll_to_adjust["testion-plasma"] = True
 
+# Helper function to handle malformed Fortran floats
+def safe_float(s):
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
 class eirene:
     def __init__(self, filepath=None):
         version = platform.python_version()
@@ -284,7 +291,7 @@ class eirene:
             self.fort46["vzdena"]  = self.__read_ft_field(fid, ver, "vzdena", (ntri, natm))*10 #kg s^-1 m^-2
             self.fort46["vzdenm"]  = self.__read_ft_field(fid, ver, "vzdenm", (ntri, nmol))*10
             self.fort46["vzdeni"]  = self.__read_ft_field(fid, ver, "vzdeni", (ntri, nion))*10
-            self.fort46["volumes"] = self.__read_ft_field(fid, ver, "volumes",(ntri, 1))*1e-6 #m^-3
+            self.fort46["volumes"] = self.__read_ft_field(fid, ver, "volumes",(ntri, 1))*1e-6 #m^3
 
             self.fort46["pux"] = self.__read_ft_field(fid, ver, "pux",(ntri, 1))
             self.fort46["puy"] = self.__read_ft_field(fid, ver, "puy",(ntri, 1))
@@ -719,7 +726,7 @@ class eirene:
             line = fid.readline()
             if not line:
                 raise EOFError(f"Unexpected EOF while reading data for {fieldname}.")
-            data.extend(map(float, line.split()))
+            data.extend(map(safe_float, line.split()))
 
         arr = np.array(data[:count])
         if not isinstance(dims,int):
@@ -921,7 +928,7 @@ class eirene:
                         raise EOFError("Unexpected end of file while reading field.")
                     numbers = []
                     try:
-                        numbers = list(map(float, line.split()))
+                        numbers = list(map(safe_float, line.split()))
                     except ValueError:
                         my_list = line.split()
                         for v in my_list:
