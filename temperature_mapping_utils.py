@@ -39,8 +39,12 @@ def split_ionization_cx(St, Sp, Tn, Ti, kB=1.0):
 
     # avoid division blowups
     Scx = np.zeros_like(St)
-    mask = np.abs(denom) > 1e-12
-    Scx[mask] = numerator[mask] / denom[mask]
+    if isinstance(denom, (int, float)):
+        if denom>1e-12:
+            Scx = numerator / denom
+    else:
+        mask = np.abs(denom) > 1e-12
+        Scx[mask] = numerator[mask] / denom[mask]
 
     # energy components
     E_ion = 1.5 * kB * Sp * Tn
