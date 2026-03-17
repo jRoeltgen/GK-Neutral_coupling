@@ -3,3 +3,5 @@
 new_*
 test_data/new_*
 __pycache__/
+.hypothesis
+*/.hypothesis
