@@ -1,11 +1,9 @@
 from scipy.interpolate import griddata
+import numpy as np
 
 # TODO add better out of bounds value/check
 def interpolate_source(tria, source, grid_r, grid_z):
-    if isinstance(source, int):
-        interp_source = np.zeros(grid_r.shape)
-        return interp_source
-    interp_source = griddata(tria.incenter, source[key], (grid_r, grid_z),
+    interp_source = griddata(tria.incenter, source, (grid_r, grid_z),
                                         method='linear')
     # Create shapely.MultiPolygon
     # Check if points of grid_r, grid_z are contained within polygon

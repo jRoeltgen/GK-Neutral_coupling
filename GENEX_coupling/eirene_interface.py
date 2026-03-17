@@ -1,6 +1,7 @@
 import eireneIO
 import B2IO
 import triangle_mesh
+from pathlib import Path
 
 def eirene_interface(eirene_path, b2_path):
     edat = eireneIO.eirene()
