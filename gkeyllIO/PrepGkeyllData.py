@@ -4,6 +4,10 @@
 
 import numpy as np
 import gkeyllIO
+
+import sys
+target_dir = "/pscratch/sd/a/akshukla/LiPlate/GK-Neutral_coupling/"
+sys.path.insert(0, target_dir)
 import B2IO as b2
 import eireneIO
 
@@ -46,5 +50,5 @@ g.calc_derived_surfr_data(b2dat, edat)
 g.calc_derived_surfz_data(b2dat, edat)
 
 #4th populate and write eirene data
-g.populate_ft31(b2dat, edat)
+a,b,c = g.populate_ft31(b2dat, edat)
 edat.write_ft31(eirene_data_path+'fort.31')
