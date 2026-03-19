@@ -50,5 +50,5 @@ g.calc_derived_surfr_data(b2dat, edat)
 g.calc_derived_surfz_data(b2dat, edat)
 
 #4th populate and write eirene data
-a,b,c = g.populate_ft31(b2dat, edat)
+g.populate_ft31(b2dat, edat)
 edat.write_ft31(eirene_data_path+'fort.31')
