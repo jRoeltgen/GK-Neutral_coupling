@@ -28,16 +28,14 @@ def eirene_interface(eirene_path, b2_path):
 
 def write_fort31(edat, genex_data, eorder, iorder):
     # vExB = ExB_velocity() see analyze_moments.py
+    upar = dict_to_array(genex_data["u_par"], iorder, edat.fort31["ua"].shape)
     nions = len(iorder)
     if nions>1:
-        feinsum = 'ijk,ij->ijk'
+        upol = upar * edat.fort31["bb"][:,:,0][:, :, None]
     else:
-        feinsum = 'ij,ij->ij'
-    upar = dict_to_array(genex_data["u_par"], iorder, edat.fort31["ua"].shape)
-    upol = np.einsum(feinsum,upar,edat.fort31["bb"][:,:,0])
+        upol = upar * edat.fort31["bb"][:,:,0]
+
     urad = dict_to_array(genex_data["u_rad"], iorder, edat.fort31["ua"].shape)
-
-
     edat.fort31["na"] = dict_to_array(genex_data["n"], iorder, edat.fort31["na"].shape)
     edat.fort31["up"] = upol
     edat.fort31["vv"] = urad
@@ -55,7 +53,7 @@ def write_fort31(edat, genex_data, eorder, iorder):
     # pressure and heat fluxes only used for eirene output/graphics
     edat.fort31["pr"] = dict_to_array(genex_data["pr"], None)
     qepar = dict_to_array(genex_data["Q_par"], eorder, edat.fort31["fhex"].shape)
-    qipar = dict_to_array(genex_data["Q_par"], iorder, edat.fort31["fhix"].shape)
+    qipar = dict_to_array(genex_data["Q_par"], iorder)
     if nions>1:
         qipar = np.mean(qipar,axis=2)
     edat.fort31["fhix"] = qipar * edat.fort31["bb"][:,:,0] # Poloidal ion heat flux

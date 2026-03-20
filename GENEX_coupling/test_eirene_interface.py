@@ -69,7 +69,7 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
     # B2 init
     mock_b2_class.assert_called_once_with(b2_path)
 
-def test_write_fort31_basic():
+def test_write_fort31_3D():
     edat = MagicMock()
 
     nx, ny, ni = 4, 5, 2
@@ -117,6 +117,69 @@ def test_write_fort31_basic():
     # Density mapping
     assert np.all(edat.fort31["na"][:,:,0] == 1)
     assert np.all(edat.fort31["na"][:,:,1] == 2)
+
+    # upar stored
+    assert np.all(edat.fort31["ua"] == 1)
+
+    # upol = upar * bb[:,:,0] (bb=1)
+    assert np.all(edat.fort31["up"] == edat.fort31["ua"])
+
+    # radial velocity propagated
+    assert np.all(edat.fort31["vv"] == 1)
+
+    # fnax = upol * na
+    assert np.all(edat.fort31["fnax"] == edat.fort31["na"])
+
+    # Heat flux shape sanity
+    assert edat.fort31["fhix"].shape == (nx, ny)
+
+    # Ensure write was triggered
+    edat.write_ft31.assert_called_once_with("fort.31")
+
+def test_write_fort31_2D():
+    edat = MagicMock()
+
+    nx, ny, ni = 4, 5, 1
+
+    # Only include fields actually used by write_fort31
+    edat.fort31 = {
+        "ua": np.zeros((nx, ny)),
+        "bb": np.ones((nx, ny, 1)),
+        "na": np.zeros((nx, ny)),
+        "ww": np.zeros((nx, ny)),
+        "te": np.zeros((nx, ny)),
+        "ti": np.zeros((nx, ny)),
+        "fnax": np.zeros((nx, ny)),
+        "fnay": np.zeros((nx, ny)),
+        "uadia": np.zeros((nx, ny)),
+        "vadia": np.zeros((nx, ny)),
+        "po": np.zeros((nx, ny)),
+        "pr": np.zeros((nx, ny)),
+        "fhex": np.zeros((nx, ny)),
+        "fhix": np.zeros((nx, ny)),
+        "vv": np.zeros((nx, ny)),
+        "up": np.zeros((nx, ny)),
+    }
+
+    edat.write_ft31 = MagicMock()
+
+    genex_data = {
+        "n": {"D": np.ones((nx, ny))},
+        "u_par": {"D": np.ones((nx, ny))},
+        "u_rad": {"D": np.ones((nx, ny))},
+        "u_phi": {"D": np.ones((nx, ny))},
+        "Ttot": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny))},
+        "es_pot": {"arb.": np.ones((nx, ny))},
+        "pr": {"arb.": np.ones((nx, ny))},
+        "Q_par": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny))}
+    }
+
+    write_fort31(edat, genex_data, ["electrons"], ["D"])
+
+    # ---- Assertions ----
+
+    # Density mapping
+    assert np.all(edat.fort31["na"][:,:] == 1)
 
     # upar stored
     assert np.all(edat.fort31["ua"] == 1)
