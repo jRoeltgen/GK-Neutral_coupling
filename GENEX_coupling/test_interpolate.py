@@ -22,7 +22,8 @@ def test_interpolate_source_exact_recovery():
     grid_r = tria.incenter[:, 0]
     grid_z = tria.incenter[:, 1]
 
-    result = interpolate_source(tria, source, grid_r, grid_z)
+    result = interpolate_source(tria, source, grid_r, grid_z, method="linear",
+                            fill_mode="constant", fill_value=0.0)
 
     assert np.allclose(result, source)
 
@@ -40,7 +41,8 @@ def test_interpolate_source_linear_field():
     grid_r = np.array([0.25, 0.5])
     grid_z = np.array([0.25, 0.5])
 
-    result = interpolate_source(tria, source, grid_r, grid_z)
+    result = interpolate_source(tria, source, grid_r, grid_z, method="linear",
+                            fill_mode="constant", fill_value=0.0)
 
     expected = 2 * grid_r + 3 * grid_z
     assert np.allclose(result, expected)
@@ -59,7 +61,8 @@ def test_interpolate_source_outside_domain_zero():
     grid_r = np.array([10.0])
     grid_z = np.array([10.0])
 
-    result = interpolate_source(tria, source, grid_r, grid_z)
+    result = interpolate_source(tria, source, grid_r, grid_z, method="linear",
+                            fill_mode="constant", fill_value=0.0)
 
     assert result[0] == 0.0
 
@@ -71,7 +74,8 @@ def test_interpolate_source_shape():
     grid_r = np.random.rand(6)
     grid_z = np.random.rand(6)
 
-    result = interpolate_source(tria, source, grid_r, grid_z)
+    result = interpolate_source(tria, source, grid_r, grid_z, method="linear",
+                            fill_mode="constant", fill_value=0.0)
 
     assert result.shape == grid_r.shape
 
