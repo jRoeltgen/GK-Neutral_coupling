@@ -442,11 +442,112 @@ class eirene:
         self.loaded_sources = loader
         self.sources = loader.sum_over_collisions()
 
+    def read_ft30(self, filename):
+        self.plasma_gmtry = {}
+        with open(filename, "r") as f:
+            lines = f.readlines()
+
+        idx = 0
+
+        def readline():
+            nonlocal idx
+            if idx >= len(lines):
+                raise EOFError("Unexpected EOF")
+            line = lines[idx]
+            idx += 1
+            return line
+
+        def backspace():
+            nonlocal idx
+            idx -= 1
+
+        # --- skip header line
+        readline()
+
+        # --- skip blank lines
+        while True:
+            line = readline()
+            if line.strip():
+                backspace()
+                break
+
+        # --- dimensions
+        dimxh, dimyh, nncut = map(int, readline().split())
+        self.plasma_gmtry["nx"] = dimxh
+        self.plasma_gmtry["ny"] = dimyh
+        self.plasma_gmtry["nncut"] = nncut
+
+        # I'm not ready to test the rest, so end here
+        return
+
+        # --- cuts (ignored for now, but parsed for future use)
+        vals = list(map(int, readline().split()))
+        nxcut = np.array(vals).reshape(-1, 4) if nncut > 0 else np.empty((0, 4), dtype=int)
+
+        # --- iso section
+        if nncut > 2:
+            nniso = int(readline().split()[0])
+            vals = list(map(int, readline().split()))
+            nxiso = np.array(vals).reshape(-1, 4)
+        else:
+            nniso = 0
+            nxiso = np.empty((0, 4), dtype=int)
+
+        # --- skip line
+        readline()
+
+        # --- detect format (same logic)
+        line = readline()
+        exp_location = 81
+        for c in ['E', 'e', 'd', 'D']:
+            pos = line.find(c)
+            if pos != -1:
+                exp_location = min(exp_location, pos + 1)
+
+        if exp_location not in (12, 13):
+            raise ValueError(f"Unrecognized format in {filename}")
+
+        backspace()
+
+        # ==========================================================
+        # 🔥 CORE CHANGE: bulk read all numeric data
+        # ==========================================================
+
+        # remaining lines → floats
+        data = []
+        for line in lines[idx:]:
+            if line.strip():
+                data.extend(map(float, line.split()))
+
+        data = np.array(data, dtype=np.float64)
+
+        # Each cell has:
+        #   4 X values + 4 Y values = 8 numbers
+        if data.size % 8 != 0:
+            raise ValueError("Data size not divisible by 8 (invalid quad stream)")
+
+        cells = data.reshape(-1, 2, 4)   # (cell, XY, corner)
+        cells = np.transpose(cells, (0, 2, 1))  # → (cell, corner, XY)
+
+        # corners are:
+        # 0: (x1,y1)
+        # 1: (x2,y2)
+        # 2: (x3,y3)
+        # 3: (x4,y4)
+
+        return {
+            "dimxh": dimxh,
+            "dimyh": dimyh,
+            "nncut": nncut,
+            "nniso": nniso,
+            "cells": cells,      # shape (N, 4, 2)
+            "nxcut": nxcut,
+            "nxiso": nxiso,
+        }
+
 
     def write_ft44(self, filename):
         meta = self.fort44["meta"]
-        neut = self.fort44["neut"]
-        wld = self.fort44["wld"]
         with open(filename, "w") as fid:
             # Write dimensions and label
             fid.write(f'{meta["nx"]:4d}  {meta["ny"]:4d}  {meta["ver"]:8d}  {meta["label"]:32s}\n')
@@ -972,52 +1073,3 @@ class eirene:
                             formatted_number = " "+mantissa+exponent
                         fid.write(formatted_number)
                     fid.write("\n")
-
-    def __read_header(self, filename, starting_line, lines_to_read):
-        lines_list = []
-        with open(filename, 'r') as fid:
-            for i,line in enumerate(fid):
-                if (i>=starting_line and i<(starting_line+lines_to_read)):
-                    lines_list.append(line)
-        return lines_list
-
-    def __read_until_pattern(self, filepath, pattern):
-        """
-        Reads a file line by line and collects lines into a list
-        until a specified pattern is found.
-
-        Args:
-          filepath (str): The path to the file to read.
-          pattern (str): The string pattern to search for.
-
-        Returns:
-          list: A list of lines read from the file before the pattern was found.
-                If the pattern is not found, all lines are returned.
-        """
-        started = False
-        with open(filepath, 'r') as file:
-            for line in file:
-                if started:
-                    if pattern in line:
-                        break  # Stop reading when the pattern is found
-                    else:
-                        last_line_read = line.strip()  # Add line (without newline char) to the list
-                else:
-                    if "ADDITIONAL" in line:
-                        started = True
-        return last_line_read
-
-    def __increment_sources(self, current_source, current_file, info):
-        species = info[-2].strip()
-        units = info[-1].strip()
-        moment_code = current_file[-3]
-        coll_code = current_file[-2]
-        particle_code = current_file[-1]
-
-        moment = extra_fort_schema.MOMENT_MAP[moment_code]
-        collision_type = extra_fort_schema.COLLISION_MAP[coll_code]
-        particle_type = extra_fort_schema.PARTICLE_CLASS_MAP[particle_code]
-        # Add to source
-        self.sources[moment][species][collision_type] = current_source
-        self.units[moment][species][collision_type] = units
-        self.particle_type[moment][species][collision_type] = particle_type

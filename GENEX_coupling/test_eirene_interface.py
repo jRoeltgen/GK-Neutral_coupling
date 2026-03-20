@@ -1,14 +1,15 @@
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import numpy as np
+import subprocess
 
-from eirene_interface import eirene_interface
+from eirene_interface import (eirene_interface, write_fort31, dict_to_array,
+                              run_eirene)
 
 @pytest.fixture
 def fake_eirene_path(tmp_path):
     # Create a temporary directory to simulate the eirene path
-    # Optionally touch a fake fort.44 to test the branch where it exists
-    (tmp_path / "fort.44").touch()
     return tmp_path
 
 @pytest.fixture
@@ -16,86 +17,169 @@ def fake_b2_path(tmp_path):
     # B2 path can be empty; B2IO is mocked
     return tmp_path
 
+@patch("eirene_interface.EireneInputParser")
 @patch("eirene_interface.triangle_mesh.triangle_mesh")
 @patch("eirene_interface.B2IO.B2")
 @patch("eirene_interface.eireneIO.eirene")
-def test_eirene_interface(mock_eirene_class, mock_b2_class, mock_mesh_class,
-                          fake_eirene_path, fake_b2_path):
-    """
-    Test the orchestration in eirene_interface:
-    - correct handling of fort.44 present vs absent
-    - triangle_mesh calc_incenter called
-    - eirene and B2 objects are returned
-    """
-    # ---- Setup mocks ----
-    fake_eirene = MagicMock()
-    fake_b2 = MagicMock()
-    fake_mesh = MagicMock()
-
-    mock_eirene_class.return_value = fake_eirene
-    mock_b2_class.return_value = fake_b2
-    mock_mesh_class.return_value = fake_mesh
-
-    # Simulate fort44 meta structure
-    fake_eirene.fort44 = {"meta": {"npls": 5}}
-    # nx, ny extracted from B2 object
-    fake_b2.gmtry = {"vol": MagicMock(shape=(10, 15))}
-
-    # Call the interface function
-    edat, b2dat = eirene_interface(fake_eirene_path, fake_b2_path)
-
-    # ---- Assertions ----
-    # Returned objects are the mocked ones
-    assert edat is fake_eirene
-    assert b2dat is fake_b2
-
-    # Triangle mesh initialized with eirene path
-    mock_mesh_class.assert_called_once_with(fake_eirene_path)
-    assert edat.triangle_mesh is fake_mesh
-
-    # calc_incenter called on triangle mesh
-    fake_mesh.calc_incenter.assert_called_once_with()
-
-    # B2 initialized with the b2 path
-    mock_b2_class.assert_called_once_with(fake_b2_path)
-
-    # Read fort44 called if file exists
-    fake_eirene.read_ft44.assert_called_once_with(fake_eirene_path / "fort.44")
-
-    # edat.read_ft31 called with nx, ny, ns=5 from fort44
-    fake_eirene.read_ft31.assert_called_once_with(fake_eirene_path / "fort.31",
-                                                  10, 15, 5)
-
-def test_eirene_interface_no_fort44(tmp_path):
-    """
-    Test the branch where fort.44 does not exist.
-    Should default ns=2 and still call read_ft31.
-    """
+def test_eirene_interface(mock_eirene_class, mock_b2_class,
+                          mock_mesh_class, mock_parser_class,
+                          tmp_path):
 
     eirene_path = tmp_path
     b2_path = tmp_path
 
-    with patch("eirene_interface.eireneIO.eirene") as mock_eirene_class, \
-         patch("eirene_interface.B2IO.B2") as mock_b2_class, \
-         patch("eirene_interface.triangle_mesh.triangle_mesh") as mock_mesh_class:
+    # ---- Mocks ----
+    fake_eirene = MagicMock()
+    fake_b2 = MagicMock()
+    fake_mesh = MagicMock()
+    fake_parser = MagicMock()
 
-        fake_eirene = MagicMock()
-        fake_b2 = MagicMock()
-        fake_mesh = MagicMock()
+    mock_eirene_class.return_value = fake_eirene
+    mock_b2_class.return_value = fake_b2
+    mock_mesh_class.return_value = fake_mesh
+    mock_parser_class.return_value = fake_parser
 
-        mock_eirene_class.return_value = fake_eirene
-        mock_b2_class.return_value = fake_b2
-        mock_mesh_class.return_value = fake_mesh
+    # Geometry dimensions now come from edat
+    fake_eirene.plasma_gmtry = {"nx": 10, "ny": 15}
 
-        fake_b2.gmtry = {"vol": MagicMock(shape=(3, 4))}
+    # Species parsing determines ns
+    fake_parser.species = {"bulk_ions": ["D", "T", "He"]}  # ns = 3
 
-        # Make sure fort44 file does not exist
-        edat, b2dat = eirene_interface(eirene_path, b2_path)
+    # ---- Call ----
+    edat, b2dat = eirene_interface(eirene_path, b2_path)
 
-        # Optionally assert returned objects
-        assert edat is mock_eirene_class.return_value
-        assert b2dat is mock_b2_class.return_value
+    # ---- Assertions ----
+    assert edat is fake_eirene
+    assert b2dat is fake_b2
 
-        # ns should default to 2
-        fake_eirene.read_ft31.assert_called_once_with(eirene_path / "fort.31",
-                                                      3, 4, 2)
+    # Parser usage
+    mock_parser_class.assert_called_once_with(eirene_path / "input.dat")
+    fake_parser.parse_species.assert_called_once()
+
+    # Mesh setup
+    mock_mesh_class.assert_called_once_with(eirene_path)
+    fake_mesh.calc_incenter.assert_called_once()
+
+    # File reads
+    fake_eirene.read_ft30.assert_called_once_with(eirene_path / "fort.30")
+    fake_eirene.read_ft31.assert_called_once_with(
+        eirene_path / "fort.31", 10, 15, 3
+    )
+
+    # B2 init
+    mock_b2_class.assert_called_once_with(b2_path)
+
+def test_write_fort31_basic():
+    edat = MagicMock()
+
+    nx, ny, ni = 4, 5, 2
+
+    # Only include fields actually used by write_fort31
+    edat.fort31 = {
+        "ua": np.zeros((nx, ny, ni)),
+        "bb": np.ones((nx, ny, 1)),
+        "na": np.zeros((nx, ny, ni)),
+        "ww": np.zeros((nx, ny, ni)),
+        "te": np.zeros((nx, ny)),
+        "ti": np.zeros((nx, ny, ni)),
+        "fnax": np.zeros((nx, ny, ni)),
+        "fnay": np.zeros((nx, ny, ni)),
+        "uadia": np.zeros((nx, ny)),
+        "vadia": np.zeros((nx, ny)),
+        "po": np.zeros((nx, ny)),
+        "pr": np.zeros((nx, ny)),
+        "fhex": np.zeros((nx, ny)),
+        "fhix": np.zeros((nx, ny)),
+        "vv": np.zeros((nx, ny, ni)),   # needed
+        "up": np.zeros((nx, ny, ni)),   # needed
+    }
+
+    # CRITICAL: prevent full write validation
+    edat.write_ft31 = MagicMock()
+
+    genex_data = {
+        "n": {"D": np.ones((nx, ny)), "T": 2*np.ones((nx, ny))},
+        "u_par": {"D": np.ones((nx, ny)), "T": np.ones((nx, ny))},
+        "u_rad": {"D": np.ones((nx, ny)), "T": np.ones((nx, ny))},
+        "u_phi": {"D": np.ones((nx, ny)), "T": np.ones((nx, ny))},
+        "Ttot": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny)),
+                 "T": np.ones((nx, ny))},
+        "es_pot": {"arb.": np.ones((nx, ny))},
+        "pr": {"arb.": np.ones((nx, ny))},
+        "Q_par": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny)),
+                  "T": np.ones((nx, ny))}
+    }
+
+    write_fort31(edat, genex_data, ["electrons"], ["D","T"])
+
+    # ---- Assertions ----
+
+    # Density mapping
+    assert np.all(edat.fort31["na"][:,:,0] == 1)
+    assert np.all(edat.fort31["na"][:,:,1] == 2)
+
+    # upar stored
+    assert np.all(edat.fort31["ua"] == 1)
+
+    # upol = upar * bb[:,:,0] (bb=1)
+    assert np.all(edat.fort31["up"] == edat.fort31["ua"])
+
+    # radial velocity propagated
+    assert np.all(edat.fort31["vv"] == 1)
+
+    # fnax = upol * na
+    assert np.all(edat.fort31["fnax"] == edat.fort31["na"])
+
+    # Heat flux shape sanity
+    assert edat.fort31["fhix"].shape == (nx, ny)
+
+    # Ensure write was triggered
+    edat.write_ft31.assert_called_once_with("fort.31")
+
+def test_dict_to_array_ordering():
+    data = {
+        "A": np.ones((2,2)),
+        "B": 2*np.ones((2,2))
+    }
+
+    arr = dict_to_array(data, ["A","B"])
+
+    assert arr.shape == (2,2,2)
+    assert np.all(arr[:,:,0] == 1)
+    assert np.all(arr[:,:,1] == 2)
+
+def test_dict_to_array_dimension_mismatch():
+    data = {
+        "A": np.ones((2,2)),
+        "B": np.ones((3,3))
+    }
+
+    with pytest.raises(ValueError):
+        dict_to_array(data, ["A","B"])
+
+@patch("eirene_interface.subprocess.run")
+def test_run_eirene_success(mock_run):
+    mock_run.return_value.returncode = 0
+
+    run_eirene(10, command="test_cmd")
+
+    mock_run.assert_called_once()
+
+@patch("eirene_interface.subprocess.run")
+def test_run_eirene_failure(mock_run):
+    mock_run.return_value.returncode = 1
+
+    with pytest.raises(SystemExit):
+        run_eirene(10)
+
+@patch("eirene_interface.subprocess.run",
+       side_effect=subprocess.TimeoutExpired(cmd="x", timeout=10))
+def test_run_eirene_timeout(mock_run):
+    with pytest.raises(SystemExit):
+        run_eirene(10)
+
+@patch("eirene_interface.subprocess.run",
+       side_effect=FileNotFoundError)
+def test_run_eirene_not_found(mock_run):
+    with pytest.raises(SystemExit):
+        run_eirene(10)

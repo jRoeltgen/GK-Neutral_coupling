@@ -1,4 +1,6 @@
 from collections import defaultdict
+import f90nml
+from pathlib import Path
 import torx
 from torx.specializations.genex import (
     initialize_genex_from_filepath,
@@ -18,13 +20,45 @@ def initialize_genex(genex_path):
     grid, equi, params, norm = initialize_genex_from_filepath(genex_path)
     return grid, equi, params, norm
 
-def load_latest_genex_fields(gpath, spec, grid, equi, params, norm):
+def get_genex_species(genex_path):
+    nml = f90nml.read(genex_path / Path('params_out.txt'))
+    names= nml['params_species']['names']
+    charge = nml['params_species']['charge']
+
+    all_species = []
+    for idx, sp in enumerate(names):
+        if len(sp.strip())>0:
+            all_species.append(species(sp, charge[idx]))
+
+    return all_species
+
+class species:
+    def __init__(self, name, charge):
+        self.name = name
+        self.charge = charge
+        self.is_electron = charge<0
+
+def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm):
     """
     Load latest GENE-X data and compute derived quantities.
     """
+    spec = []
+    electrons = []
+    ions = []
+    for s in all_spec:
+        spec.append(s.name)
+        if s.is_electron:
+            electrons.append(s.name)
+        else:
+            ions.append(s.name)
+    if (len(ions)>1):
+        raise ValueError("Torx library functions not generalized to 2+ ion species")
+    if (len(electrons)>1):
+        raise ValueError("Multiple assumed electrons (charge<0) given")
+
     NO_SPECIES = "N/A"
     EXPECTED_FIELDS = {"es_pot", "n", "u_par", "E_par", "E_perp",
-        "Q_par", "Q_perp", "Ttot", "u_phi", "u_rad", "q_es",
+        "Q_par", "Q_perp", "Ttot", "u_phi", "u_rad", "q_es", "pr",
     }
     VALID_SPECIES = set(spec) | {NO_SPECIES}
     out = defaultdict(dict)
@@ -85,7 +119,9 @@ def load_latest_genex_fields(gpath, spec, grid, equi, params, norm):
                                             get_field("es_pot", NO_SPECIES),
                                             get_field("E_par",s),
                                             get_field("E_perp",s)))
-
+    set_field("pr", s, total_pressure(get_field("n",electrons[0]),
+                                      get_field("Ttot", electrons[0]),
+                                      get_field("Ttot", ions[0]), norm).values)
 
     return out
 
