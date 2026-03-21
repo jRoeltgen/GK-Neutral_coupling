@@ -1,6 +1,7 @@
 from scipy.interpolate import griddata
 from collections import defaultdict
 import numpy as np
+import warnings
 
 def interpolate_all_sources(tria, source_dict, grid_r, grid_z, method="linear",
                             fill_mode="constant", fill_value=0.0):
@@ -32,6 +33,22 @@ def interpolate_source(tria, source, grid_r, grid_z, method, fill_mode,
 # There are 3 interpolation routines in torx
 # TODO add better out of bounds value/check
 def interp_moments(gmtry, grid_r, grid_z, field, ind):
+    VALID_INDS = {
+        (0, 2),
+        (2, 3),
+        (0, 1, 2, 3),
+    }
+    if isinstance(ind, slice):
+        ind_tuple = tuple(range(*ind.indices(4)))
+    else:
+        ind_tuple = tuple(ind)
+    if ind_tuple not in VALID_INDS:
+        warnings.warn(
+            f"interp_moments received non-standard ind={ind_tuple}. "
+            "This is geometrically valid but not used in standard physics.",
+            UserWarning,
+            stacklevel=2,
+        )
     r = np.mean(gmtry["crx"][:,:,ind],2)
     z = np.mean(gmtry["cry"][:,:,ind],2)
     # Maybe RBF interpolator?

@@ -9,6 +9,13 @@ import numpy as np
 def eirene_interface(eirene_path, b2_path):
     edat = eireneIO.eirene()
     edat.triangle_mesh = triangle_mesh.triangle_mesh(eirene_path)
+    # b2dat is only needed for the crx/cry variables
+    # It can be replaced by reading the fort.30 file into python
+    # To fully remove this portion from using SOLPS infrastructure only needs
+    #   read/write fort.30 and some mesh generation which might also be possible
+    #   in python. It can then write the fort.33/34/35 files using the
+    #   triangle_mesh class. It appears the writing of input.dat is independent
+    #   of the mesh (uinp is called before b2ag in triang).
     b2dat = B2IO.B2(b2_path)
 
     eip = EireneInputParser(eirene_path / Path("input.dat"))

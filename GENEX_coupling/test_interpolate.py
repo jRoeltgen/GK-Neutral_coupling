@@ -4,8 +4,54 @@ import pytest
 from hypothesis import given, strategies as st
 from interpolate import (
     interp_moments,
-    interpolate_source
+    interpolate_source,
+    interpolate_all_sources
 )
+
+from unittest.mock import patch
+
+def test_interpolate_all_sources_dispatch_and_structure():
+    tria = type("MockTria", (), {})()
+
+    source_dict = {
+        "mom1": {
+            "speciesA": {
+                "src1": np.array([1.0, 2.0]),
+                "src2": np.array([3.0, 4.0]),
+            },
+            "speciesB": {
+                "src3": np.array([5.0, 6.0]),
+            },
+        }
+    }
+
+    grid_r = np.array([0.1])
+    grid_z = np.array([0.2])
+
+    with patch("interpolate.interpolate_source", side_effect=lambda *args,
+               **kwargs: "X") as mock_interp:
+        out = interpolate_all_sources(
+            tria,
+            source_dict,
+            grid_r,
+            grid_z,
+            method="linear",
+            fill_mode="constant",
+            fill_value=0.0,
+        )
+
+    # Structure preserved
+    assert "mom1" in out
+    assert "speciesA" in out["mom1"]
+    assert "speciesB" in out["mom1"]
+
+    # Correct number of calls (3 leaf sources)
+    assert mock_interp.call_count == 3
+
+    # All leaves mapped
+    assert out["mom1"]["speciesA"]["src1"] == "X"
+    assert out["mom1"]["speciesA"]["src2"] == "X"
+    assert out["mom1"]["speciesB"]["src3"] == "X"
 
 def test_interpolate_source_exact_recovery():
     # Simple triangle mesh (3 points)
@@ -79,23 +125,6 @@ def test_interpolate_source_shape():
 
     assert result.shape == grid_r.shape
 
-def test_interp_moments_shape_and_zero():
-    gmtry = {
-        "crx": np.random.rand(4, 5, 4),
-        "cry": np.random.rand(4, 5, 4),
-    }
-
-    field = np.random.rand(6)
-
-    grid_r = np.random.rand(6)
-    grid_z = np.random.rand(6)
-
-    result = interp_moments(gmtry, grid_r, grid_z, field, key="density")
-
-    assert result.shape == (4, 5)
-    assert np.all(np.isfinite(result))  # NaNs replaced with 0
-
-
 @pytest.fixture
 def interp_inputs():
     gmtry = {
@@ -112,21 +141,21 @@ def interp_inputs():
 
 
 @pytest.mark.parametrize(
-    "key, expected_r, expected_z",
+    "ind, expected_r, expected_z",
     [
-        ("poloidal_fluxes", 10.0, 100.0),
-        ("radial_fluxes", 25.0, 250.0),
-        ("volume", 15.0, 150.0),
+        ([0, 2], 10.0, 100.0),
+        ([2, 3], 25.0, 250.0),
+        ([0, 1, 2, 3], 15.0, 150.0),
     ],
 )
 @patch("interpolate.griddata")
-def test_interp_moments_branches(mock_griddata, interp_inputs,
-                                key, expected_r, expected_z):
+def test_interp_moments_indices(mock_griddata, interp_inputs,
+                               ind, expected_r, expected_z):
 
     gmtry, grid_r, grid_z, field = interp_inputs
     mock_griddata.return_value = np.zeros((1, 1))
 
-    interp_moments(gmtry, grid_r, grid_z, field, key)
+    interp_moments(gmtry, grid_r, grid_z, field, ind)
 
     args, _ = mock_griddata.call_args
     r_passed, z_passed = args[2]
@@ -148,7 +177,7 @@ def test_interp_moments_linear_field():
     # Linear field: f = r + 2z
     field = grid_r + 2 * grid_z
 
-    result = interp_moments(gmtry, grid_r, grid_z, field, key="volume")
+    result = interp_moments(gmtry, grid_r, grid_z, field, ind=[0, 1, 2, 3])
 
     # Expected interpolation point
     r_expected = np.mean(gmtry["crx"][0, 0, :])
@@ -177,9 +206,25 @@ def test_interp_moments_properties(nx, ny, npts):
 
     field = np.random.rand(npts)
 
-    result = interp_moments(gmtry, grid_r, grid_z, field, key="density")
+    result = interp_moments(gmtry, grid_r, grid_z, field, ind=[0, 1, 2, 3])
 
     # ---- Properties ----
     assert result.shape == (nx, ny)
     assert not np.isnan(result).any()
     assert np.isfinite(result).all()
+
+@patch("interpolate.griddata")
+def test_interp_moments_warns_on_nonstandard_ind(mock_griddata):
+    gmtry = {
+        "crx": np.random.rand(1, 1, 4),
+        "cry": np.random.rand(1, 1, 4),
+    }
+
+    grid_r = np.array([0.0])
+    grid_z = np.array([0.0])
+    field = np.array([1.0])
+
+    mock_griddata.return_value = np.zeros((1, 1))
+
+    with pytest.warns(UserWarning, match="non-standard ind"):
+        interp_moments(gmtry, grid_r, grid_z, field, ind=[1, 3])
