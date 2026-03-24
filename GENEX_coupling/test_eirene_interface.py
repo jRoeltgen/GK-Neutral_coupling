@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import subprocess
 
-from eirene_interface import (eirene_interface, write_fort31, dict_to_array,
-                              run_eirene)
+from eirene_interface import (eirene_interface, prepare_fort31, dict_to_array,
+                              run_eirene, status)
 
 @pytest.fixture
 def fake_eirene_path(tmp_path):
@@ -69,12 +69,12 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
     # B2 init
     mock_b2_class.assert_called_once_with(b2_path)
 
-def test_write_fort31_3D():
+def test_prepare_fort31_3D():
     edat = MagicMock()
 
     nx, ny, ni = 4, 5, 2
 
-    # Only include fields actually used by write_fort31
+    # Only include fields actually used by prepare_fort31
     edat.fort31 = {
         "ua": np.zeros((nx, ny, ni)),
         "bb": np.ones((nx, ny, 1)),
@@ -110,7 +110,7 @@ def test_write_fort31_3D():
                   "T": np.ones((nx, ny))}
     }
 
-    write_fort31(edat, genex_data, ["electrons"], ["D","T"])
+    prepare_fort31(edat, genex_data, ["electrons"], ["D","T"])
 
     # ---- Assertions ----
 
@@ -133,15 +133,12 @@ def test_write_fort31_3D():
     # Heat flux shape sanity
     assert edat.fort31["fhix"].shape == (nx, ny)
 
-    # Ensure write was triggered
-    edat.write_ft31.assert_called_once_with("fort.31")
-
-def test_write_fort31_2D():
+def test_prepare_fort31_2D():
     edat = MagicMock()
 
     nx, ny, ni = 4, 5, 1
 
-    # Only include fields actually used by write_fort31
+    # Only include fields actually used by prepare_fort31
     edat.fort31 = {
         "ua": np.zeros((nx, ny)),
         "bb": np.ones((nx, ny, 1)),
@@ -174,7 +171,7 @@ def test_write_fort31_2D():
         "Q_par": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny))}
     }
 
-    write_fort31(edat, genex_data, ["electrons"], ["D"])
+    prepare_fort31(edat, genex_data, ["electrons"], ["D"])
 
     # ---- Assertions ----
 
@@ -195,9 +192,6 @@ def test_write_fort31_2D():
 
     # Heat flux shape sanity
     assert edat.fort31["fhix"].shape == (nx, ny)
-
-    # Ensure write was triggered
-    edat.write_ft31.assert_called_once_with("fort.31")
 
 def test_dict_to_array_ordering():
     data = {
@@ -220,29 +214,62 @@ def test_dict_to_array_dimension_mismatch():
     with pytest.raises(ValueError):
         dict_to_array(data, ["A","B"])
 
-@patch("eirene_interface.subprocess.run")
-def test_run_eirene_success(mock_run):
-    mock_run.return_value.returncode = 0
+@patch("eirene_interface.subprocess.Popen")
+def test_run_eirene_success(mock_popen, tmp_path):
+    mock_proc = mock_popen.return_value
+    mock_proc.wait.return_value = None
+    mock_proc.returncode = 0
 
-    run_eirene(10, command="test_cmd")
+    result = run_eirene(10, tmp_path, command="test_cmd")
 
-    mock_run.assert_called_once()
+    assert result == status.SUCCESS
+    mock_popen.assert_called_once()
 
-@patch("eirene_interface.subprocess.run")
-def test_run_eirene_failure(mock_run):
-    mock_run.return_value.returncode = 1
+@patch("eirene_interface.subprocess.Popen")
+def test_run_eirene_failure(mock_popen, tmp_path):
+    mock_proc = mock_popen.return_value
+    mock_proc.wait.return_value = None
+    mock_proc.returncode = 1
 
-    with pytest.raises(SystemExit):
-        run_eirene(10)
+    result = run_eirene(10, tmp_path)
 
-@patch("eirene_interface.subprocess.run",
-       side_effect=subprocess.TimeoutExpired(cmd="x", timeout=10))
-def test_run_eirene_timeout(mock_run):
-    with pytest.raises(SystemExit):
-        run_eirene(10)
+    assert result == status.ERROR
 
-@patch("eirene_interface.subprocess.run",
+@patch("eirene_interface.os.killpg")
+@patch("eirene_interface.subprocess.Popen")
+def test_run_eirene_timeout(mock_popen, mock_killpg, tmp_path):
+    mock_proc = mock_popen.return_value
+    mock_proc.pid = 1234  # critical
+
+    mock_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=10)
+
+    result = run_eirene(10, tmp_path)
+
+    assert result == status.TIMEOUT
+    mock_killpg.assert_called()  # optional but good
+
+@patch("eirene_interface.os.killpg")
+@patch("eirene_interface.subprocess.Popen")
+def test_run_eirene_timeout_kills_process(mock_popen, mock_killpg, tmp_path):
+    mock_proc = mock_popen.return_value
+    mock_proc.pid = 1234
+
+    # First wait → timeout
+    # Second wait → also timeout (forces SIGKILL path)
+    mock_proc.wait.side_effect = [
+        subprocess.TimeoutExpired(cmd="x", timeout=10),
+        subprocess.TimeoutExpired(cmd="x", timeout=10),
+    ]
+
+    result = run_eirene(10, tmp_path)
+
+    assert result == status.TIMEOUT
+    assert mock_killpg.call_count >= 1
+
+@patch("eirene_interface.subprocess.Popen",
        side_effect=FileNotFoundError)
-def test_run_eirene_not_found(mock_run):
-    with pytest.raises(SystemExit):
-        run_eirene(10)
+def test_run_eirene_not_found(mock_popen, tmp_path):
+
+    result = run_eirene(10, tmp_path)
+
+    assert result == status.ERROR

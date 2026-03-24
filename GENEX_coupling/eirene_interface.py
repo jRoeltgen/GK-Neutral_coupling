@@ -5,6 +5,14 @@ from EireneInputParser import EireneInputParser
 from pathlib import Path
 import subprocess
 import numpy as np
+import os
+import signal
+import enum
+
+class status(enum.IntEnum):
+    SUCCESS = 0
+    TIMEOUT = -1
+    ERROR = -2
 
 def eirene_interface(eirene_path, b2_path):
     edat = eireneIO.eirene()
@@ -20,7 +28,8 @@ def eirene_interface(eirene_path, b2_path):
 
     eip = EireneInputParser(eirene_path / Path("input.dat"))
     eip.parse_species()
-    ns = len(eip.species["bulk_ions"])
+    edat.species_names = eip.species
+    ns = len(edat.species_names["bulk_ions"])
 
     edat.read_ft30(eirene_path / Path("fort.30"))
 
@@ -33,7 +42,7 @@ def eirene_interface(eirene_path, b2_path):
 
     return edat, b2dat
 
-def write_fort31(edat, genex_data, eorder, iorder):
+def prepare_fort31(edat, genex_data, eorder, iorder):
     # vExB = ExB_velocity() see analyze_moments.py
     upar = dict_to_array(genex_data["u_par"], iorder, edat.fort31["ua"].shape)
     nions = len(iorder)
@@ -68,8 +77,6 @@ def write_fort31(edat, genex_data, eorder, iorder):
     edat.fort31["fhex"] = qepar * edat.fort31["bb"][:,:,0] # Poloidal electron heat flux
     # Radial electron heat flux
 
-    edat.write_ft31("fort.31")
-
 def dict_to_array(dict_in, order, dim=None):
     if not order:
         return next(iter(dict_in.values()))
@@ -84,21 +91,47 @@ def dict_to_array(dict_in, order, dim=None):
             f"Dimensions of new fort.31 field {arr.shape} don't match original: {dim}")
     return arr
 
-def run_eirene(Eirene_time, command="eirobjx"):
-    output_file = "run.log"
+def run_eirene(Eirene_time, eirene_path, command="eirobjx"):
+    output_file = eirene_path / Path("run.log")
     try:
         with open(output_file, "w") as outfile:
-            result = subprocess.run(command, stdout=outfile, stderr=subprocess.STDOUT,
-                                    text=True, timeout=Eirene_time)
-        if result.returncode != 0:
-            print(f"❌{command} failed with return code {result.returncode}")
-            raise SystemExit(result.returncode)
-    except subprocess.TimeoutExpired:
-        print(f"Error: {command} timed out after {Eirene_time} seconds.")
-        raise SystemExit(1)
+            proc = subprocess.Popen([command], stdout=outfile,
+                                    stderr=subprocess.STDOUT,
+                                    text=True, timeout=Eirene_time,
+                                    cwd=eirene_path, preexec_fn=os.setsid)
+            try:
+                proc.wait(timeout=Eirene_time)
+
+            except subprocess.TimeoutExpired:
+                print(f"⏱️ {command} exceeded {Eirene_time}s — killing process group")
+
+                # Kill entire process group
+                if proc.pid:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                else:
+                    print("⚠️ Invalid PID, skipping killpg")
+
+                # Optional: escalate if needed
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    if proc.pid:
+                        print("⚠️ Force killing EIRENE")
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        print("⚠️ Invalid PID, skipping killpg")
+
+                with open(output_file, "a") as outfile:
+                    outfile.write(f"\n--- TIMEOUT after {Eirene_time}s ---\n")
+
+                return status.TIMEOUT
+        if proc.returncode != 0:
+            print(f"❌{command} failed with return code {proc.returncode}")
+            return status.ERROR
     except FileNotFoundError:
-        print("⚠️ Error: {command} command not found. Make sure it’s in your PATH.")
-        raise SystemExit(1)
+        print(f"⚠️ Error: {command} command not found. Make sure it’s in your PATH.")
+        return status.ERROR
     except Exception as e:
         print(f"⚠️  Unexpected error running {command}: {e}")
-        raise SystemExit(1)
+        return status.ERROR
+    return status.SUCCESS
