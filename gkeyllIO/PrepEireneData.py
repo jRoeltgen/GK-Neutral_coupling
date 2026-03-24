@@ -1,3 +1,6 @@
+import sys
+target_dir = "/pscratch/sd/a/akshukla/LiPlate/GK-Neutral_coupling/"
+sys.path.insert(0, target_dir)
 import B2IO as b2
 import eireneIO as eirene
 import triangle_mesh as tri_mesh
@@ -5,6 +8,20 @@ import scipy.constants as pyconst
 import numpy as np
 import postgkyl as pg
 
+from scipy.ndimage import median_filter
+ 
+# Helper Function for de-noising
+def despike_source(data, kernel_size=3):
+    """
+    Applies a median filter to remove single-pixel outliers (Monte Carlo noise).
+    A 3x3 kernel is usually sufficient to kill spikes without blurring features.
+    """
+    # Check for NaNs just in case and replace with 0
+    data = np.nan_to_num(data, nan=0.0)
+    return median_filter(data, size=kernel_size)
+
+
+# Eirene Data Loading
 ion = "D+"
 molecule = "D2+"
 # read fort.44 and fort.46 from given director ("./")
@@ -94,7 +111,7 @@ for i, simName in enumerate(simNames):
             M0m[ix,iz] = pmsource[linidx]/eV*1e6
 
             # M1 source calculation
-            M1i[ix,iz] = 0.0 #misource[linidx]*10/mass_ion/eV
+            M1i[ix,iz] = misource[linidx]*10/mass_ion/eV
             M1e[ix,iz] = 0.0 
             M1m[ix,iz] = 0.0 
 
@@ -104,9 +121,12 @@ for i, simName in enumerate(simNames):
             M2m[ix,iz] = emsource[linidx]*1e6/mass_molecule*2.0
 
 
+    # Smooth data
+    M1i_smoothed = despike_source(M1i, kernel_size=3)
+
     # Append the clipped/smoothed data
     M0i_list.append(M0i)
-    M1i_list.append(M1i)
+    M1i_list.append(M1i_smoothed)
     M2i_list.append(M2i)
     M0e_list.append(M0e)
     M1e_list.append(M1e)
