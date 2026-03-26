@@ -20,15 +20,14 @@ def initialize_genex(genex_path):
     grid, equi, params, norm = initialize_genex_from_filepath(genex_path)
     return grid, equi, params, norm
 
-def get_genex_species(genex_path):
-    nml = f90nml.read(genex_path / Path('params_out.txt'))
-    names= nml['params_species']['names']
-    charge = nml['params_species']['charge']
+def get_genex_species(params):
+    names = params['params_species']['names']
+    charges = params['params_species']['charges']
 
     all_species = []
     for idx, sp in enumerate(names):
         if len(sp.strip())>0:
-            all_species.append(species(sp, charge[idx]))
+            all_species.append(species(sp, charges[idx]))
 
     return all_species
 

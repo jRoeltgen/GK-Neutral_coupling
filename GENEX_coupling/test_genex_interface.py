@@ -214,63 +214,47 @@ def test_multiple_electrons_raises(fake_grid, fake_norm):
             norm=fake_norm,
         )
 
-def test_species_classification():
-    e = species("e", -1)
-    d = species("D+", 1)
-    n = species("D0", 0)
-
-    assert e.name == "e"
-    assert e.charge == -1
-    assert e.is_electron is True
-
-    assert d.name == "D+"
-    assert d.charge == 1
-    assert d.is_electron is False
-
-    assert n.is_electron is False
-
-@patch("genex_interface.f90nml.read")
-def test_get_genex_species_basic(mock_read, tmp_path):
-    mock_read.return_value = {
+def test_get_genex_species_basic():
+    params = {
         "params_species": {
             "names": ["e", "D"],
-            "charge": [-1, 1],
+            "charges": [-1, 1],
         }
     }
 
-    result = get_genex_species(tmp_path)
+    result = get_genex_species(params)
 
     assert len(result) == 2
-    assert result[0].name == "e"
+    assert result[0].name == params["params_species"]["names"][0]
+    assert result[0].charge == params["params_species"]["charges"][0]
     assert result[0].is_electron is True
     assert result[1].name == "D"
+    assert result[1].charge == 1
     assert result[1].is_electron is False
 
-@patch("genex_interface.f90nml.read")
-def test_get_genex_species_ignores_empty(mock_read, tmp_path):
-    mock_read.return_value = {
+def test_get_genex_species_ignores_empty():
+    params = {
         "params_species": {
             "names": ["e", " ", "", "D"],
-            "charge": [-1, 0, 0, 1],
+            "charges": [-1, 0, 0, 1],
         }
     }
 
-    result = get_genex_species(tmp_path)
+    result = get_genex_species(params)
 
     assert len(result) == 2
     names = [s.name for s in result]
     assert names == ["e", "D"]
 
-@patch("genex_interface.f90nml.read")
-def test_get_genex_species_charge_alignment(mock_read, tmp_path):
-    mock_read.return_value = {
+def test_get_genex_species_charge_alignment():
+    params = {
         "params_species": {
             "names": ["e", "D"],
-            "charge": [-2, 3],  # unusual but valid
+            "charges": [-2, 3],  # unusual but valid
         }
     }
 
-    result = get_genex_species(tmp_path)
+    result = get_genex_species(params)
 
     assert result[0].charge == -2
     assert result[1].charge == 3

@@ -27,7 +27,7 @@ def main(args, deps=None):
         )
     edat, b2dat = eirene_interface(eirene_path, eirene_path)
     grid, equi, params, norm = genex_interface.initialise_genex(genex_path)
-    genex_species = genex_interface.get_genex_species(genex_path)
+    genex_species = genex_interface.get_genex_species(params)
     genex_electrons = get_genex_electron_name(genex_species)
     check_species_consistency(edat.species_names["bulk_ions"], genex_species)
     grid_r = grid.r_u
