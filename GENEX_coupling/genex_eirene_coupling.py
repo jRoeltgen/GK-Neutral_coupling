@@ -38,7 +38,7 @@ def main(args, deps=None):
     while deps.pid_exists(args.pid):
         genex_fields = genex_interface.load_latest_genex_fields(genex_path,
                                         genex_species, grid, equi, params, norm)
-        tau = genex_fields["es_pot"]["N/A"].tau.values
+        tau = genex_fields["es_pot"]["N/A"].coords["tau"].values[-1]
         if (tau <= last_tau):
             deps.sleep(5)
             continue
@@ -72,7 +72,8 @@ def main(args, deps=None):
             elif eirene_status == status.ERROR:
                 deps.killpg(args.pid, SIGTERM)
                 raise RuntimeError("EIRENE failed. Exiting")
-        edat.load_extra_forts(eirene_path=eirene_path, coll_to_adjust=None)
+        edat.load_extra_forts(eirene_path=eirene_path, coll_to_adjust=None,
+                              convert_units=True)
 
         if args.SumTemp:
             sources = edat.sources
@@ -105,9 +106,9 @@ def check_species_consistency(eirene_species, genex_species):
 def interpolate_all_moments(gmtry, grid_r, grid_z, genex_out):
     out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     for field, field_block in genex_out.items():
-        if field == "poloidal_fluxes":
+        if field == "poloidal_fluxes": # Not currently used
             ind = [0,2]
-        elif field == "radial_fluxes":
+        elif field == "radial_fluxes": # Not currently used
             ind = [2,3]
         else:
             ind = [0,1,2,3]

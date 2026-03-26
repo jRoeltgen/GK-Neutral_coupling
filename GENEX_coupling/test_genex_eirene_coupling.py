@@ -3,6 +3,14 @@ from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
 from genex_eirene_coupling import main, status
 import numpy as np
+import xarray as xr
+
+def make_es_pot(tau_offset):
+    return xr.DataArray(
+    data=np.ones((3, 4, 1895)),
+    dims=("tau", "phi", "points"),
+    coords={"tau": np.linspace(0, 0.005, 3) * tau_offset},
+)
 
 def test_main_single_iteration_success_DI(tmp_path):
     # ---- Args ----
@@ -54,10 +62,8 @@ def test_main_single_iteration_success_DI(tmp_path):
         ]
     )
 
-    tau_obj = SimpleNamespace(values=1.0)
-
     genex_eirene_coupling.genex_interface.load_latest_genex_fields = MagicMock(
-        return_value={"es_pot": {"N/A": SimpleNamespace(tau=tau_obj)}}
+        return_value={"es_pot": {"N/A": make_es_pot(1.0)}}
     )
 
     genex_eirene_coupling.genex_interface.toroidal_avg = MagicMock(return_value={})
@@ -120,10 +126,8 @@ def test_main_timeout_kills_and_raises_DI():
         ]
     )
 
-    tau_obj = SimpleNamespace(values=1.0)
-
     genex_eirene_coupling.genex_interface.load_latest_genex_fields = MagicMock(
-        return_value={"es_pot": {"N/A": SimpleNamespace(tau=tau_obj)}}
+        return_value={"es_pot": {"N/A": make_es_pot(1.0)}}
     )
 
     genex_eirene_coupling.genex_interface.toroidal_avg = MagicMock(return_value={})
@@ -195,10 +199,8 @@ def test_main_retry_and_doubling_DI(tmp_path):
         ]
     )
 
-    tau_obj = SimpleNamespace(values=1.0)
-
     genex_eirene_coupling.genex_interface.load_latest_genex_fields = MagicMock(
-        return_value={"es_pot": {"N/A": SimpleNamespace(tau=tau_obj)}}
+        return_value={"es_pot": {"N/A": make_es_pot(1.0)}}
     )
 
     genex_eirene_coupling.genex_interface.toroidal_avg = MagicMock(return_value={})
@@ -219,3 +221,185 @@ def test_main_retry_and_doubling_DI(tmp_path):
 
     mock_deps.write_nc.assert_called_once()
     mock_deps.replace.assert_called_once()
+
+def test_main_multiple_iterations(tmp_path):
+    # ---- Args ----
+    args = SimpleNamespace(
+        pid=1234,
+        eirene_time=10,
+        MAX_TIMEOUTS=2,
+        SumTemp=True,
+        filepattern=str(tmp_path / "out_"),
+    )
+
+    # ---- Mock dependencies ----
+    # EIRENE status per call: success for all calls
+    mock_run_eirene = MagicMock(side_effect=[status.SUCCESS] * 3)
+    mock_write_nc = MagicMock()
+    mock_killpg = MagicMock()
+    mock_sleep = MagicMock()
+    mock_replace = MagicMock()
+    # pid_exists: 3 True then False to exit loop
+    mock_pid_exists = MagicMock(side_effect=[True, True, True, False])
+
+    deps = SimpleNamespace(
+        run_eirene=mock_run_eirene,
+        write_nc=mock_write_nc,
+        killpg=mock_killpg,
+        sleep=mock_sleep,
+        replace=mock_replace,
+        pid_exists=mock_pid_exists,
+    )
+
+    # ---- Mock EIRENE + GENEX objects ----
+    mock_edat = MagicMock()
+    mock_edat.species_names = {"bulk_ions": ["D"]}
+    mock_edat.tria = "tria"
+    mock_edat.sources = {"D": np.array([1.0])}
+    mock_edat.write_ft31 = MagicMock()
+    mock_edat.load_extra_forts = MagicMock()
+
+    mock_b2dat = MagicMock()
+    mock_b2dat.gmtry = "gmtry"
+
+    import genex_eirene_coupling
+
+    genex_eirene_coupling.eirene_interface = MagicMock(
+        return_value=(mock_edat, mock_b2dat)
+    )
+
+    mock_grid = MagicMock()
+    mock_grid.r_u = np.array([1.0])
+    mock_grid.z_u = np.array([2.0])
+
+    genex_eirene_coupling.genex_interface.initialise_genex = MagicMock(
+        return_value=(mock_grid, None, None, None)
+    )
+
+    genex_eirene_coupling.genex_interface.get_genex_species = MagicMock(
+        return_value=[
+            SimpleNamespace(name="D", is_electron=False),
+            SimpleNamespace(name="e", is_electron=True),
+        ]
+    )
+
+    # Provide increasing tau values to pass last_tau check
+    genex_eirene_coupling.genex_interface.load_latest_genex_fields = MagicMock(
+        side_effect=[{"es_pot": {"N/A": make_es_pot(1.0)}},
+                     {"es_pot": {"N/A": make_es_pot(2.0)}},
+                     {"es_pot": {"N/A": make_es_pot(3.0)}},
+        ]
+    )
+
+    genex_eirene_coupling.genex_interface.toroidal_avg = MagicMock(return_value={})
+    genex_eirene_coupling.interpolate_all_moments = MagicMock(return_value={})
+    genex_eirene_coupling.interpolate_all_sources = MagicMock(return_value={})
+
+    # ---- Run ----
+    main(args, deps=deps)
+
+    # ---- Assertions ----
+    # Loop should have run 3 iterations
+    assert mock_run_eirene.call_count == 3
+    assert mock_write_nc.call_count == 3
+    # replace should be called for each iteration
+    assert mock_replace.call_count == 3
+    # pid_exists should have been called at least 4 times
+    assert mock_pid_exists.call_count >= 4
+    # killpg should not be called (no timeout exceeded)
+    mock_killpg.assert_not_called()
+    # sleep should not be called as tau always increases
+    mock_sleep.assert_not_called()
+
+
+def test_main_last_tau_prevents_iteration(tmp_path):
+
+    # ---- Args ----
+    args = SimpleNamespace(
+        pid=1234,
+        eirene_time=10,
+        MAX_TIMEOUTS=2,
+        SumTemp=True,
+        filepattern=str(tmp_path / "out_"),
+    )
+
+    # ---- Dependencies ----
+    mock_run_eirene = MagicMock(return_value=status.SUCCESS)
+    mock_write_nc = MagicMock()
+    mock_killpg = MagicMock()
+    mock_sleep = MagicMock()
+    mock_replace = MagicMock()
+
+    # pid exists twice, then exits
+    mock_pid_exists = MagicMock(side_effect=[True, True, False])
+
+    deps = SimpleNamespace(
+        run_eirene=mock_run_eirene,
+        write_nc=mock_write_nc,
+        killpg=mock_killpg,
+        sleep=mock_sleep,
+        replace=mock_replace,
+        pid_exists=mock_pid_exists,
+    )
+
+    # ---- Mock EIRENE/GENEX ----
+    import genex_eirene_coupling
+
+    mock_edat = MagicMock()
+    mock_edat.species_names = {"bulk_ions": ["D"]}
+    mock_edat.tria = "tria"
+    mock_edat.sources = {"D": np.array([1.0])}
+    mock_edat.write_ft31 = MagicMock()
+    mock_edat.load_extra_forts = MagicMock()
+
+    mock_b2dat = MagicMock()
+    mock_b2dat.gmtry = "gmtry"
+
+    genex_eirene_coupling.eirene_interface = MagicMock(
+        return_value=(mock_edat, mock_b2dat)
+    )
+
+    mock_grid = MagicMock()
+    mock_grid.r_u = np.array([1.0])
+    mock_grid.z_u = np.array([2.0])
+
+    genex_eirene_coupling.genex_interface.initialise_genex = MagicMock(
+        return_value=(mock_grid, None, None, None)
+    )
+
+    genex_eirene_coupling.genex_interface.get_genex_species = MagicMock(
+        return_value=[
+            SimpleNamespace(name="D", is_electron=False),
+            SimpleNamespace(name="e", is_electron=True),
+        ]
+    )
+
+    # ---- FORCE SAME tau twice ----
+    genex_eirene_coupling.genex_interface.load_latest_genex_fields = MagicMock(
+        return_value={"es_pot": {"N/A": make_es_pot(1.0)}}
+    )
+
+    genex_eirene_coupling.genex_interface.toroidal_avg = MagicMock(return_value={})
+    genex_eirene_coupling.interpolate_all_moments = MagicMock(return_value={})
+    genex_eirene_coupling.interpolate_all_sources = MagicMock(return_value={})
+
+    # ---- Run ----
+    main(args, deps=deps)
+
+    # ---- Assertions ----
+
+    # Only ONE iteration should complete (second is skipped)
+    assert mock_run_eirene.call_count == 1
+
+    # One output write
+    assert mock_write_nc.call_count == 1
+    assert mock_replace.call_count == 1
+
+    # sleep should be triggered due to repeated tau
+    mock_sleep.assert_called()
+
+    # second loop iteration was skipped → no second EIRENE run
+    assert mock_pid_exists.call_count >= 2
+
+    # no failure path
+    mock_killpg.assert_not_called()
