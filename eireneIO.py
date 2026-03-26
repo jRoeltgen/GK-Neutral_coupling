@@ -5,8 +5,9 @@ import triangle_mesh as triangles
 import numpy as np
 import glob
 import scipy.constants as pyconst
-import platform
+import sys
 from pathlib import Path
+from copy import deepcopy
 # for debugging
 import pdb
 
@@ -22,9 +23,8 @@ def safe_float(s):
 
 class eirene:
     def __init__(self, filepath=None):
-        version = platform.python_version()
-        if not(int(version[0]) >= 3 and int(version[2:4])>=10):
-            print("Python version 3.10 or greater needed for eirene.load_extra_forts()")
+        if sys.version_info < (3, 10):
+            print("Python version 3.10 or greater needed for match/case in load_extra_forts")
             return
         self.fort44 = {"meta":{}, "neut":{}, "wld":{}, "res":{}}
         self.fort44_expanded = {}
@@ -388,7 +388,7 @@ class eirene:
                          requested_strata=None, expected_species=None,
                          vol_rec_mapping=None, debug=False,
                          coll_to_adjust=default_coll_to_adjust, print_info=False,
-                         species_patt_to_ignore=">"):
+                         species_patt_to_ignore=">", convert_units=False):
         if isinstance(eirene_path, str):
             eirene_path = Path(eirene_path)
         filelist = eirene_path.glob("fort."+extension)
@@ -441,6 +441,11 @@ class eirene:
 
         self.loaded_sources = loader
         self.sources = loader.sum_over_collisions()
+
+        if convert_units:
+            self.convert_source_dict_to_SI(self.sources)
+            self.full_source_in_SI = deepcopy(self.loaded_sources.sources)
+            self.convert_source_dict_to_SI(self.full_source_in_SI)
 
     def read_ft30(self, filename):
         self.plasma_gmtry = {}
@@ -1073,3 +1078,23 @@ class eirene:
                             formatted_number = " "+mantissa+exponent
                         fid.write(formatted_number)
                     fid.write("\n")
+
+    def convert_source_dict_to_SI(self, d):
+        for root_key, subtree in d.items():
+            self._apply(subtree, root_key)
+
+    def _apply(self, d, root_key):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                self._apply(v, root_key)
+            elif isinstance(v, np.ndarray):
+                d[k] = self._convert_source_to_SI(v, root_key)
+
+    def _convert_source_to_SI(self, arr, moment):
+        match moment:
+            case(0 | "0" | "n" | "density"):
+                return arr*1e6/pyconst.elementary_charge
+            case(1 | "1" | "momentum"):
+                return arr*10/pyconst.elementary_charge
+            case(2 | "2" | "energy"):
+                return arr*1e6

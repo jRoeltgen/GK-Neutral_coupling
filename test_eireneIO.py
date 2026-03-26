@@ -1,6 +1,10 @@
 import filecmp
+import sys
+if sys.version_info < (3, 6):
+    raise ImportError("Python >=3.6 is needed for eireneIO")
 import eireneIO
 import numpy as np
+import scipy.constants as pyconst
 
 filepath = "./test_data/eirene_data/"
 edat = eireneIO.eirene(filepath)
@@ -45,4 +49,40 @@ if (not flag):
     print("Error. Fort.401 and pdena from fort.46 differ")
 
 if all_true:
-    print("No errors in eireneIO.")
+    print("No errors in eireneIO file I/O.")
+
+# ---- Input data ----
+d = {
+    "density": {
+        "a": np.array([1.0, 2.0]),
+        "nested": {
+            "b": np.array([3.0])
+        }
+    },
+    "momentum": {
+        "c": np.array([4.0])
+    },
+    "energy": {
+        "d": np.array([5.0])
+    }
+}
+
+# Keep reference for in-place check
+original_id = id(d["density"])
+
+# ---- Run conversion ----
+edat.convert_source_dict_to_SI(d)
+eV = pyconst.elementary_charge
+
+# ---- Expected values ----
+assert np.allclose(d["density"]["a"], np.array([1.0, 2.0]) * 1e6 / eV)
+assert np.allclose(d["density"]["nested"]["b"], np.array([3.0]) * 1e6 / eV)
+
+assert np.allclose(d["momentum"]["c"], np.array([4.0]) * 10 / eV)
+
+assert np.allclose(d["energy"]["d"], np.array([5.0]) * 1e6)
+
+# ---- In-place structure check ----
+assert id(d["density"]) == original_id
+
+print("Testing convert_source_dict_to_SI passed.")
