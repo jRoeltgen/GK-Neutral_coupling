@@ -39,6 +39,7 @@ def main(args, deps=None):
         genex_fields = genex_interface.load_latest_genex_fields(genex_path,
                                         genex_species, grid, equi, params, norm)
         tau = genex_fields["es_pot"]["N/A"].coords["tau"].values[-1]
+        print(tau,last_tau)
         if (tau <= last_tau):
             deps.sleep(5)
             continue
