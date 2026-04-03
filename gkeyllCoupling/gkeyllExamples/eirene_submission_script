@@ -1,0 +1,16 @@
+#! /bin/tcsh
+
+set SOLPSTOP = <PATH_TO_SOLPSTOP>
+cd $SOLPSTOP
+source setup.csh
+echo Using SOLPSTOP = ${SOLPSTOP}
+cd <RUNDIR>/<SOLPSRUNDIR>
+
+update_solps_run_status "Using SOLPSTOP = #SOLPSTOP#"
+update_solps_run_status "Started on `hostname` at `date`"
+
+eirobjx >& run.log.wEir
+
+
+update_solps_run_status "Finished on `hostname` at `date`"
+
