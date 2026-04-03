@@ -1,3 +1,6 @@
+import sys
+target_dir = "../common/"
+sys.path.insert(0, target_dir)
 import pytest
 import numpy as np
 import pdb

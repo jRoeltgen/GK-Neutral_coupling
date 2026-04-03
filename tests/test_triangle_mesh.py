@@ -1,3 +1,6 @@
+import sys
+target_dir = "../common/"
+sys.path.insert(0, target_dir)
 import numpy as np
 import pytest
 from triangle_mesh import triangle_mesh
