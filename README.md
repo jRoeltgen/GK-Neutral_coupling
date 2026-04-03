@@ -2,6 +2,8 @@ This repo contains a python library that can be used to couple gyrokinetic codes
 
 Modules used to extract/process eirene data are stored in the common folder
 
+Tests for the modules in common along with the test data are in the tests folder 
+
 Modules used to couple eirene to gkeyll are in the gkeyllCoupling folder.
 
 Within the gkeyllCoupling folder are three subfolders:
