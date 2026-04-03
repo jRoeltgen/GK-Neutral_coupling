@@ -6,7 +6,7 @@ import numpy as np
 import gkeyllIO
 
 import sys
-target_dir = "/pscratch/sd/a/akshukla/LiPlate/GK-Neutral_coupling/"
+target_dir = "/pscratch/sd/a/akshukla/LiPlate/GK-Neutral_coupling/common/"
 sys.path.insert(0, target_dir)
 import B2IO as b2
 import eireneIO
