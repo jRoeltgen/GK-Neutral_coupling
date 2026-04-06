@@ -62,11 +62,11 @@ class gkeyll:
         self.interpolated_surfz_data = {}
 
         if self.fast_reflection:
-            copper_data = np.genfromtxt('GK-Neutral_coupling/gkeyllCoupling/reflection_data/65_DonCu.txt', skip_header=1,delimiter=',')
+            copper_data = np.genfromtxt('../reflection_data/65_DonCu.txt', skip_header=1,delimiter=',')
             copper_data[:,0] = copper_data[:,0]*1000*self.eV # Convert from keV to J
             self.Cuinterpolator = interp1d(copper_data[:,0], copper_data[:,1], bounds_error=False, fill_value='extrapolate')
 
-            lithium_data = np.genfromtxt('GK-Neutral_coupling/gkeyllCoupling/reflection_data/65_DonLi.txt', skip_header=1,delimiter=',')
+            lithium_data = np.genfromtxt('../reflection_data/65_DonLi.txt', skip_header=1,delimiter=',')
             lithium_data[:,0] = lithium_data[:,0]*1000*self.eV # Convert from keV to J
             self.Liinterpolator = interp1d(lithium_data[:,0], lithium_data[:,1], bounds_error=False, fill_value='extrapolate')
 
