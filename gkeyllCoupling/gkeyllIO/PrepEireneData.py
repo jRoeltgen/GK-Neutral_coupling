@@ -27,9 +27,9 @@ gkeyll_simulation_name = paths['gkeyll_simulation_name']
 eirene_data_path = paths['eirene_data_path']
 gkeyll_text_input_path = paths['gkeyll_text_input_path']
 
-# Block range for half-domain (fixed for now)
-bmin = 0
-bmax = 8
+# Block range
+bmin = config['gkeyll_options']['bmin']
+bmax = config['gkeyll_options']['bmax']
  
 # Helper Function for de-noising
 def despike_source(data, kernel_size=3):

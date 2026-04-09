@@ -28,6 +28,8 @@ paths:
 gkeyll_options:
   # Domain configuration
   half_domain: true              # Run with half-domain (true) or full-domain (false)
+  bmin: 0                        # Min block number
+  bmax: 8                        # Max block number
   
   # Physics parameters
   diffusivity: 0.5               # Diffusivity parameter
