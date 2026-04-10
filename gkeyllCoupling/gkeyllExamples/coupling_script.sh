@@ -68,7 +68,7 @@ while kill -0 $GKEYLL_PID 2> /dev/null; do
         echo "Detected new Gkeyll output frame ${frame}. Running post-processing..."
 
         # Run Python post-processing
-        python3 ${GKLIB_PATH}/gkeyllCoupling/gkeyllIO/PrepGkeyllData.py
+        python3 ${GKLIB_PATH}/gkeyllCoupling/gkeyllIO/PrepGkeyllData.py config.yaml
         
         echo "Done setting up EIRENE inputs"
 
@@ -88,7 +88,7 @@ while kill -0 $GKEYLL_PID 2> /dev/null; do
 
         echo "Done runnine EIRENE, Now converting eirene to Gkeyll input..."
 
-        python3 ${GKLIB_PATH}/gkeyllCoupling/gkeyllIO/PrepEireneData.py
+        python3 ${GKLIB_PATH}/gkeyllCoupling/gkeyllIO/PrepEireneData.py config.yaml
 
         # Remove flags to avoid re-processing
         rm -f gkeyll_text_output/new_data_flag 
