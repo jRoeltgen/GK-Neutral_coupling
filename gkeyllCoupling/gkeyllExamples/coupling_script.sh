@@ -84,11 +84,11 @@ while kill -0 $GKEYLL_PID 2> /dev/null; do
         echo "Done storing EIRENE Data, Running eirene..."
 
         #Run EIRENE
-        tcsh ${RUNDIR}/${SOLPSRUNDIR}/eirene_submission_script
+        tcsh ${SOLPSRUNDIR}/eirene_submission_script
 
         echo "Done runnine EIRENE, Now converting eirene to Gkeyll input..."
 
-        python3 .${GKLIB_PATH}/gkeyllCoupling/gkeyllIO/PrepEireneData.py
+        python3 ${GKLIB_PATH}/gkeyllCoupling/gkeyllIO/PrepEireneData.py
 
         # Remove flags to avoid re-processing
         rm -f gkeyll_text_output/new_data_flag 
