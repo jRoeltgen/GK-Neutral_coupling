@@ -4,29 +4,47 @@
 
 import numpy as np
 import gkeyllIO
-
+import yaml
 import sys
 import os
-target_dir = os.getcwd() + "/GK-Neutral_coupling/common/"
+
+# Load configuration from YAML file
+config_file = sys.argv[1]
+with open(config_file, 'r') as f:
+    config = yaml.safe_load(f)
+
+# Extract paths and options
+paths = config['paths']
+gkeyll_options = config['gkeyll_options']
+
+# Validate that required paths exist
+required_paths = ['eirene_data_path', 'b2_data_path', 'coordinate_mapping_path', 'gkeyll_text_output_path', 'lib_path']
+for path_key in required_paths:
+    if not os.path.exists(paths[path_key]):
+        print(f"Warning: {path_key} does not exist: {paths[path_key]}")
+
+target_dir = paths['lib_path'] + "common/"
 sys.path.insert(0, target_dir)
 import B2IO as b2
 import eireneIO
 
-# First set data input paths
-gkeyll_data_path = './'
-gkeyll_simulation_name = 'hstep26'
-gkeyll_half_domain=True
-gkeyll_diffusivity=0.5
-gkeyll_extra_species = ["molecule"]
+# Set data input paths from config
+gkeyll_data_path = paths['gkeyll_data_path']
+gkeyll_simulation_name = paths['gkeyll_simulation_name']
+gkeyll_half_domain = gkeyll_options['half_domain']
+gkeyll_diffusivity = gkeyll_options['diffusivity']
+gkeyll_extra_species = gkeyll_options['extra_species']
 
-eirene_data_path = "./step_full_device_D+D2_walled_off/gkeyll_w_2D2/"
-b2_data_path = "./step_full_device_D+D2_walled_off/baserun/"
+# Ensure extra_species is a list
+if not isinstance(gkeyll_extra_species, list):
+    gkeyll_extra_species = [gkeyll_extra_species] if gkeyll_extra_species else []
 
-coordinate_mapping_path = './python_data/hstep26_geodata/'
+eirene_data_path = paths['eirene_data_path']
+b2_data_path = paths['b2_data_path']
+coordinate_mapping_path = paths['coordinate_mapping_path']
 
-#Set data output paths and get frame number
-gkeyll_text_output_path = './gkeyll_text_output/'
-eirene_output_path = './eirene_text_output/'
+# Set data output paths and get frame number
+gkeyll_text_output_path = paths['gkeyll_text_output_path']
 frame = int(np.genfromtxt(gkeyll_text_output_path+"new_data_flag"))
 
 #Second load data

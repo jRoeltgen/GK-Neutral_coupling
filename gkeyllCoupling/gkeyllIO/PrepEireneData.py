@@ -1,15 +1,35 @@
 import sys
 import os
-target_dir = os.getcwd() + "/GK-Neutral_coupling/common/"
-sys.path.insert(0, target_dir)
-import B2IO as b2
-import eireneIO as eirene
-import triangle_mesh as tri_mesh
+import yaml
 import scipy.constants as pyconst
 import numpy as np
 import postgkyl as pg
 
 from scipy.ndimage import median_filter
+
+# Load configuration from YAML file
+config_file = sys.argv[1] if len(sys.argv) > 1 else 'gkeyllCoupling/gkeyllExamples/config.yaml'
+with open(config_file, 'r') as f:
+    config = yaml.safe_load(f)
+
+# Extract paths from config
+paths = config['paths']
+
+target_dir = paths['lib_path'] + "common/"
+sys.path.insert(0, target_dir)
+import B2IO as b2
+import eireneIO as eirene
+import triangle_mesh as tri_mesh
+
+# Set paths from config
+gkeyll_data_path = paths['gkeyll_data_path']
+gkeyll_simulation_name = paths['gkeyll_simulation_name']
+eirene_data_path = paths['eirene_data_path']
+gkeyll_text_input_path = paths['gkeyll_text_input_path']
+
+# Block range
+bmin = config['gkeyll_options']['bmin']
+bmax = config['gkeyll_options']['bmax']
  
 # Helper Function for de-noising
 def despike_source(data, kernel_size=3):
@@ -27,7 +47,6 @@ ion = "D+"
 molecule = "D2+"
 # read fort.44 and fort.46 from given director ("./")
 # read fort.33, fort.34, and fort.35 from given director ("./")
-eirene_data_path = "./step_full_device_D+D2_walled_off/gkeyll_w_2D2/"
 edat = eirene.eirene(eirene_data_path)
 edat.load_extra_forts(eirene_data_path)
 edat.triangle_mesh.calc_incenter()
@@ -54,10 +73,6 @@ emsource = edat.sources["energy"]["TEST IONS"]["SUM"]
 
 # Step 1: load the Gkeyll grid information
 #     same as process_eirene_output.py's Step 1
-gkeyll_data_path = './'
-gkeyll_simulation_name = 'hstep26'
-bmin = 0
-bmax = 8
 simNames = ['%s_b%d'%(gkeyll_data_path+gkeyll_simulation_name,i) for i in range(bmin,bmax)]
 Rlist = []
 Zlist = []
@@ -140,18 +155,18 @@ for i, simName in enumerate(simNames):
 
 fNames = ['%s_b%d'%(gkeyll_simulation_name,i) for i in range(bmin,bmax)]
 for i, fname in enumerate(fNames):
-    np.savetxt('./gkeyll_text_input/'+fname+"-ion_M0source.txt", M0i_list[i].flatten())
-    np.savetxt('./gkeyll_text_input/'+fname+"-ion_M1source.txt", M1i_list[i].flatten())
-    np.savetxt('./gkeyll_text_input/'+fname+"-ion_M2source.txt", M2i_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-ion_M0source.txt", M0i_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-ion_M1source.txt", M1i_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-ion_M2source.txt", M2i_list[i].flatten())
 
 
-    np.savetxt('./gkeyll_text_input/'+fname+"-elc_M0source.txt", M0e_list[i].flatten())
-    np.savetxt('./gkeyll_text_input/'+fname+"-elc_M1source.txt", M1e_list[i].flatten())
-    np.savetxt('./gkeyll_text_input/'+fname+"-elc_M2source.txt", M2e_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-elc_M0source.txt", M0e_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-elc_M1source.txt", M1e_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-elc_M2source.txt", M2e_list[i].flatten())
 
-    np.savetxt('./gkeyll_text_input/'+fname+"-molecule_M0source.txt", M0m_list[i].flatten())
-    np.savetxt('./gkeyll_text_input/'+fname+"-molecule_M1source.txt", M1m_list[i].flatten())
-    np.savetxt('./gkeyll_text_input/'+fname+"-molecule_M2source.txt", M2m_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-molecule_M0source.txt", M0m_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-molecule_M1source.txt", M1m_list[i].flatten())
+    np.savetxt(gkeyll_text_input_path+fname+"-molecule_M2source.txt", M2m_list[i].flatten())
 
             
 print("Finished converting text to Gkeyll input")   

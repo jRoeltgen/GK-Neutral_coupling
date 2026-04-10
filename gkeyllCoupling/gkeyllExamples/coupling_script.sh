@@ -29,6 +29,7 @@
 
 RUNDIR=$(pwd)
 SOLPSRUNDIR=$(pwd)/<PATH TO YOUR SOLPS RUN>
+GKLIB_PATH=<PATH TO YOUR GKLIB INSTALL>
 
 module load python/3.12
 module load PrgEnv-gnu/8.6.0
@@ -67,7 +68,7 @@ while kill -0 $GKEYLL_PID 2> /dev/null; do
         echo "Detected new Gkeyll output frame ${frame}. Running post-processing..."
 
         # Run Python post-processing
-        python3 ./GK-Neutral_coupling/gkeyllIO/PrepGkeyllData.py
+        python3 ${GKLIB_PATH}/gkeyllCoupling/gkeyllIO/PrepGkeyllData.py config.yaml
         
         echo "Done setting up EIRENE inputs"
 
@@ -83,11 +84,11 @@ while kill -0 $GKEYLL_PID 2> /dev/null; do
         echo "Done storing EIRENE Data, Running eirene..."
 
         #Run EIRENE
-        tcsh ${RUNDIR}/${SOLPSRUNDIR}/eirene_submission_script
+        tcsh ${SOLPSRUNDIR}/eirene_submission_script
 
         echo "Done runnine EIRENE, Now converting eirene to Gkeyll input..."
 
-        python3 ./GK-Neutral_coupling/gkeyllIO/PrepEireneData.py
+        python3 ${GKLIB_PATH}/gkeyllCoupling/gkeyllIO/PrepEireneData.py config.yaml
 
         # Remove flags to avoid re-processing
         rm -f gkeyll_text_output/new_data_flag 
