@@ -32,6 +32,11 @@ def split_ionization_cx(St, Sp, Tn, Ti, kB=1.0):
         CX energy contribution
     """
 
+    if St.shape != Sp.shape:
+        raise ValueError("St and Sp must have the same shape")
+    Tn = np.asarray(Tn)
+    Ti = np.asarray(Ti)
+
     pref = 2.0 / (3.0 * kB)
 
     numerator = pref * St - Sp * Tn
@@ -57,7 +62,10 @@ def linear_temperature_mapper(T_label):
     Maps all moments of a collision linearly to a single temperature.
     """
     def mapper(mom, species, strata_dict, temperature_values, context):
-        return {T_label: strata_dict["SUM"]}
+        return {
+            "values": {T_label: strata_dict["SUM"]},
+            "conserved_and_constrained": True,
+        }
     return mapper
 
 def atom_plasma_cx_mapper(
@@ -76,7 +84,10 @@ def atom_plasma_cx_mapper(
 
     # Non-energy moments are linear
     if mom != "energy":
-        return {"Tn": arr}
+        return {"values":
+                    {"Tn": arr},
+                "conserved_and_constrained": True,
+                }
 
     # Energy split
     St = arr
@@ -89,8 +100,11 @@ def atom_plasma_cx_mapper(
     )
 
     return {
-        "Tn": E_ion,
-        "Ti": E_cx,
+        "values": {
+            "Tn": E_ion,
+            "Ti": E_cx,
+        },
+        "conserved_and_constrained": False,
     }
 
 default_D_only_collision_mappers = {

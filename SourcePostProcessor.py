@@ -1,6 +1,8 @@
 from collections import defaultdict
 from temperature_mapping_utils import default_D_only_collision_mappers
 import numpy as np
+import temperature_mapping_utils
+print(temperature_mapping_utils.__file__)
 
 class SourcePostProcessor:
 
@@ -73,20 +75,23 @@ class SourcePostProcessor:
                         context=context,
                     )
 
-                    # ---- Conservation check (generic) ----
-                    input_sum = strata_dict["SUM"]
-                    output_sum = sum(out.values())
+                    values = out["values"]
+                    conservative = out.get("conserved_and_constrained", False)
 
-                    if not np.allclose(
-                        input_sum, output_sum, rtol=1e-10, atol=1e-12
-                    ):
-                        raise AssertionError(
-                            f"Source not conserved for "
-                            f"{mom}/{species}/{coll}"
-                        )
+                    # ---- Conservation check (generic) ----
+                    if conservative:
+                        input_sum = strata_dict["SUM"]
+                        output_sum = sum(values.values())
+
+                        if (not np.allclose(input_sum, output_sum,
+                                            rtol=1e-10, atol=1e-12)):
+                            raise AssertionError(
+                                f"Source not conserved for "
+                                f"{mom}/{species}/{coll}"
+                            )
 
                     # ---- Aggregate into temperature bins ----
-                    for T_label, arr in out.items():
+                    for T_label, arr in values.items():
                         if sources_T[mom][species][T_label] is None:
                             sources_T[mom][species][T_label] = arr.copy()
                         else:

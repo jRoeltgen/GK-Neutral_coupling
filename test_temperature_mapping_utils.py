@@ -104,6 +104,21 @@ def test_partial_mask_behavior():
 # 2. linear_temperature_mapper
 # ============================================================
 
+def test_atom_plasma_mapper_returns_new_schema():
+    from temperature_mapping_utils import atom_plasma_cx_mapper
+
+    out = atom_plasma_cx_mapper(
+        mom="energy",
+        species="D",
+        strata_dict={"SUM": np.array([10.0])},
+        temperature_values={"Tn": np.array([3.0]), "Ti": np.array([1.0])},
+        context={"particle_sources": {"D": np.array([1.0])}},
+    )
+
+    assert "values" in out
+    assert "conserved_and_constrained" in out
+    assert set(out["values"].keys()) == {"Tn", "Ti"}
+
 def test_linear_temperature_mapper():
     mapper = linear_temperature_mapper("Ti")
 
@@ -118,8 +133,9 @@ def test_linear_temperature_mapper():
         context={},
     )
 
-    assert "Ti" in result
-    np.testing.assert_array_equal(result["Ti"], arr)
+    assert "values" in result
+    assert "Ti" in result["values"]
+    np.testing.assert_array_equal(result["values"]["Ti"], arr)
 
 
 # ============================================================
@@ -137,7 +153,7 @@ def test_atom_plasma_mapper_non_energy():
         context={"particle_sources": {"D": np.array([1.0, 1.0])}},
     )
 
-    np.testing.assert_array_equal(result["Tn"], arr)
+    np.testing.assert_array_equal(result["values"]["Tn"], arr)
 
 
 def test_atom_plasma_mapper_energy_split(simple_case):
@@ -156,8 +172,8 @@ def test_atom_plasma_mapper_energy_split(simple_case):
         context={"particle_sources": {"D": Sp}},
     )
 
-    E_ion = result["Tn"]
-    E_cx = result["Ti"]
+    E_ion = result["values"]["Tn"]
+    E_cx = result["values"]["Ti"]
 
     np.testing.assert_allclose(E_ion + E_cx, St, rtol=1e-12, atol=0)
 
@@ -245,5 +261,5 @@ def test_atom_plasma_mapper_physics_consistency(simple_case):
         context={"particle_sources": {"D": Sp}},
     )
 
-    np.testing.assert_allclose(result["Tn"], 1.5 * Sp * Tn, rtol=1e-12, atol=0)
-    np.testing.assert_allclose(result["Ti"], 1.5 * Scx_true * (Tn - Ti), rtol=1e-12, atol=0)
+    np.testing.assert_allclose(result["values"]["Tn"], 1.5 * Sp * Tn, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(result["values"]["Ti"], 1.5 * Scx_true * (Tn - Ti), rtol=1e-12, atol=0)
