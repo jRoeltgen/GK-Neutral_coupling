@@ -63,7 +63,8 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
     # File reads
     fake_eirene.read_ft30.assert_called_once_with(eirene_path / "fort.30")
     fake_eirene.read_ft31.assert_called_once_with(
-        eirene_path / "fort.31", 10, 15, 3
+        eirene_path / "fort.31", fake_eirene.plasma_gmtry["nx"]+2,
+        fake_eirene.plasma_gmtry["ny"]+2, len(fake_parser.species["bulk_ions"])
     )
 
     # B2 init

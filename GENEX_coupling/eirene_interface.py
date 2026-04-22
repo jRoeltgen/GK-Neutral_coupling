@@ -36,7 +36,7 @@ def eirene_interface(eirene_path, b2_path):
     nx = edat.plasma_gmtry["nx"]
     ny = edat.plasma_gmtry["ny"]
 
-    edat.read_ft31(eirene_path / "fort.31", nx, ny, ns)
+    edat.read_ft31(eirene_path / Path("fort.31"), nx+2, ny+2, ns)
 
     edat.triangle_mesh.calc_incenter()
 
@@ -46,6 +46,7 @@ def prepare_fort31(edat, genex_data, eorder, iorder):
     # vExB = ExB_velocity() see analyze_moments.py
     upar = dict_to_array(genex_data["u_par"], iorder, edat.fort31["ua"].shape)
     nions = len(iorder)
+    eorder = [eorder] if not isinstance(eorder, list) else eorder
     if nions>1:
         upol = upar * edat.fort31["bb"][:,:,0][:, :, None]
     else:
