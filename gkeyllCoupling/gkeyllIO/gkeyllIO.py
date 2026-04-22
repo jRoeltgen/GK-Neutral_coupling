@@ -16,7 +16,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 class gkeyll:
-    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5, extra_species = [], fast_reflection=True, final_cu_rec_coeff = 0.95, final_li_recyc_coeff = 0.99):
+    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5, extra_species = [], fast_reflection=True, final_plate_rec_coeff = 0.99, final_wall_rec_coeff = 0.99, plate_material = "Cu", wall_material = "Cu"):
         # Universal params
         self.mp = 1.67262192e-27
         self.me = 9.1093837e-31
@@ -33,8 +33,10 @@ class gkeyll:
         self.charges["molecule"] = self.eV
         self.D = diffusivity
         self.fast_reflection = fast_reflection
-        self.final_cu_rec_coeff = final_cu_rec_coeff
-        self.final_li_recyc_coeff = final_li_recyc_coeff
+        self.final_plate_rec_coeff = final_plate_rec_coeff
+        self.final_wall_rec_coeff = final_wall_rec_coeff
+        self.plate_material = plate_material
+        self.wall_material = wall_material
 
         self.species_list = ["elc", "ion"] + extra_species
 
@@ -61,14 +63,19 @@ class gkeyll:
         self.interpolated_surfz_data = {}
 
         if self.fast_reflection:
+            reflection_interpolators = {}
+
             dir_path = os.path.dirname(os.path.abspath(__file__))
             copper_data = np.genfromtxt(dir_path + '/reflection_data/65_DonCu.txt', skip_header=1,delimiter=',')
             copper_data[:,0] = copper_data[:,0]*1000*self.eV # Convert from keV to J
-            self.Cuinterpolator = interp1d(copper_data[:,0], copper_data[:,1], bounds_error=False, fill_value='extrapolate')
+            reflection_interpolators["Cu"] = interp1d(copper_data[:,0], copper_data[:,1], bounds_error=False, fill_value='extrapolate')
 
             lithium_data = np.genfromtxt(dir_path + '/reflection_data/65_DonLi.txt', skip_header=1,delimiter=',')
             lithium_data[:,0] = lithium_data[:,0]*1000*self.eV # Convert from keV to J
-            self.Liinterpolator = interp1d(lithium_data[:,0], lithium_data[:,1], bounds_error=False, fill_value='extrapolate')
+            reflection_interpolators["Li"] = interp1d(lithium_data[:,0], lithium_data[:,1], bounds_error=False, fill_value='extrapolate')
+
+            self.Plateinterpolator = reflection_interpolators[self.plate_material]
+            self.Wallinterpolator = reflection_interpolators[self.wall_material]
 
 
 
@@ -838,16 +845,16 @@ class gkeyll:
             ft31["ion_charge"] = np.ones_like(ft31["na"])
 
         if self.fast_reflection:
-            CuCoeff = self.Cuinterpolator(self.interpolated_surfz_data['em'])
-            LiCoeff = self.Liinterpolator(self.interpolated_surfr_data['em'])
-            species2_x = 2.0*CuCoeff
+            PlateCoeff = self.Plateinterpolator(self.interpolated_surfz_data['em'])
+            WallCoeff = self.Wallinterpolator(self.interpolated_surfr_data['em'])
+            species2_x = 2.0*PlateCoeff
             species2_y = 0.0
-            species3_x = self.final_cu_rec_coeff - CuCoeff
+            species3_x = self.final_plate_rec_coeff - PlateCoeff
             species3_x[species3_x <0] = 0
             species3_y = 1.0
-            species4_x = 2.0*LiCoeff
+            species4_x = 2.0*WallCoeff
             species4_y = 0.0
-            species5_x = self.final_li_recyc_coeff - LiCoeff
+            species5_x = self.final_wall_rec_coeff - WallCoeff
             species5_x[species5_x <0] = 0
             species5_y = 0.0
             xcoeffs = [species2_x, species3_x, species4_x, species5_x]
