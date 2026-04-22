@@ -415,7 +415,7 @@ class eirene:
             header_lines = 8
             Ncells = int(lines_list[header_lines-1].split()[0])-1
             if (Ncells != ntria):
-                raise ValueError(f"Number of triangles from mesh unequal to number from {current_file}")
+                raise ValueError(f"Number of triangles from mesh ({ntria}) unequal to number from {current_file} ({Ncells})")
             add_cells = int(lines_list[header_lines-1].split()[4])-1 - Ncells
             start_line = header_lines
             while x*Ncells < len(lines_list):
@@ -1092,9 +1092,12 @@ class eirene:
 
     def _convert_source_to_SI(self, arr, moment):
         match moment:
-            case(0 | "0" | "n" | "density"):
+            case(0 | "0" | "n" | "particle"):
                 return arr*1e6/pyconst.elementary_charge
             case(1 | "1" | "momentum"):
                 return arr*10/pyconst.elementary_charge
             case(2 | "2" | "energy"):
                 return arr*1e6
+            case _:
+                raise ValueError(f"Unknown moment '{moment}' in "
+                                 f"_convert_source_to_SI")

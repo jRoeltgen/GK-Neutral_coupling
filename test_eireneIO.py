@@ -53,7 +53,7 @@ if all_true:
 
 # ---- Input data ----
 d = {
-    "density": {
+    "particle": {
         "a": np.array([1.0, 2.0]),
         "nested": {
             "b": np.array([3.0])
@@ -68,21 +68,21 @@ d = {
 }
 
 # Keep reference for in-place check
-original_id = id(d["density"])
+original_id = id(d["particle"])
 
 # ---- Run conversion ----
 edat.convert_source_dict_to_SI(d)
 eV = pyconst.elementary_charge
 
 # ---- Expected values ----
-assert np.allclose(d["density"]["a"], np.array([1.0, 2.0]) * 1e6 / eV)
-assert np.allclose(d["density"]["nested"]["b"], np.array([3.0]) * 1e6 / eV)
+assert np.allclose(d["particle"]["a"], np.array([1.0, 2.0]) * 1e6 / eV)
+assert np.allclose(d["particle"]["nested"]["b"], np.array([3.0]) * 1e6 / eV)
 
 assert np.allclose(d["momentum"]["c"], np.array([4.0]) * 10 / eV)
 
 assert np.allclose(d["energy"]["d"], np.array([5.0]) * 1e6)
 
 # ---- In-place structure check ----
-assert id(d["density"]) == original_id
+assert id(d["particle"]) == original_id
 
 print("Testing convert_source_dict_to_SI passed.")
