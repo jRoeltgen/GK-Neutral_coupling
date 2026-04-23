@@ -1,4 +1,5 @@
-from scipy.interpolate import griddata
+from scipy.interpolate import (griddata, LinearNDInterpolator)
+from scipy.spatial import Delaunay
 from collections import defaultdict
 import numpy as np
 import warnings
@@ -11,7 +12,7 @@ def interpolate_all_sources(tria, source_dict, grid_r, grid_z, method="linear",
             for source, value in species_block.items():
                 out[mom][species][source] = interpolate_source(tria, value,
                             grid_r, grid_z, method=method, fill_mode=fill_mode,
-                            fill_value=fill_value)
+                            fill_value=fill_value).reshape(1,len(grid_r))
     return out
 
 # TODO add better out of bounds value/check
@@ -30,9 +31,13 @@ def interpolate_source(tria, source, grid_r, grid_z, method, fill_mode,
 
     return interp_source
 
+def build_triangulation(r, z):
+    points = np.column_stack([r.ravel(), z.ravel()])
+    return Delaunay(points)
+
 # There are 3 interpolation routines in torx
 # TODO add better out of bounds value/check
-def interp_moments(gmtry, grid_r, grid_z, field, ind):
+def interp_moments(gmtry, tri, field, ind):
     VALID_INDS = {
         (0, 2),
         (2, 3),
@@ -52,6 +57,8 @@ def interp_moments(gmtry, grid_r, grid_z, field, ind):
     r = np.mean(gmtry["crx"][:,:,ind],2)
     z = np.mean(gmtry["cry"][:,:,ind],2)
     # Maybe RBF interpolator?
-    interp_data = griddata((grid_r, grid_z), field, (r, z), method = 'linear')
+    interp = LinearNDInterpolator(tri, field.ravel())
+    xi = np.column_stack([r.ravel(), z.ravel()])
+    interp_data = interp(xi).reshape(r.shape)
     interp_data[np.isnan(interp_data)] = 0
     return interp_data

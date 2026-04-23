@@ -5,7 +5,8 @@ from hypothesis import given, strategies as st
 from interpolate import (
     interp_moments,
     interpolate_source,
-    interpolate_all_sources
+    interpolate_all_sources,
+    build_triangulation
 )
 
 from unittest.mock import patch
@@ -28,8 +29,9 @@ def test_interpolate_all_sources_dispatch_and_structure():
     grid_r = np.array([0.1])
     grid_z = np.array([0.2])
 
-    with patch("interpolate.interpolate_source", side_effect=lambda *args,
-               **kwargs: "X") as mock_interp:
+    dummy = np.array([42.0])
+
+    with patch("interpolate.interpolate_source", return_value=dummy) as mock_interp:
         out = interpolate_all_sources(
             tria,
             source_dict,
@@ -48,10 +50,9 @@ def test_interpolate_all_sources_dispatch_and_structure():
     # Correct number of calls (3 leaf sources)
     assert mock_interp.call_count == 3
 
-    # All leaves mapped
-    assert out["mom1"]["speciesA"]["src1"] == "X"
-    assert out["mom1"]["speciesA"]["src2"] == "X"
-    assert out["mom1"]["speciesB"]["src3"] == "X"
+    # Check reshape applied
+    assert out["mom1"]["speciesA"]["src1"].shape == (1, len(grid_r))
+    assert np.all(out["mom1"]["speciesA"]["src1"] == 42.0)
 
 def test_interpolate_source_exact_recovery():
     # Simple triangle mesh (3 points)
@@ -125,6 +126,23 @@ def test_interpolate_source_shape():
 
     assert result.shape == grid_r.shape
 
+# -------------------------
+# build_triangulation
+# -------------------------
+
+def test_build_triangulation_basic():
+    r = np.array([[0, 1], [0, 1]])
+    z = np.array([[0, 0], [1, 1]])
+
+    tri = build_triangulation(r, z)
+
+    # Expect 4 input points
+    assert tri.points.shape == (4, 2)
+
+    # Points should match flattened input
+    expected = np.column_stack([r.ravel(), z.ravel()])
+    assert np.allclose(tri.points, expected)
+
 @pytest.fixture
 def interp_inputs():
     gmtry = {
@@ -148,20 +166,25 @@ def interp_inputs():
         ([0, 1, 2, 3], 15.0, 150.0),
     ],
 )
-@patch("interpolate.griddata")
-def test_interp_moments_indices(mock_griddata, interp_inputs,
-                               ind, expected_r, expected_z):
+def test_interp_moments_indices_behavior(ind, expected_r, expected_z):
+    gmtry = {
+        "crx": np.array([[[0, 10, 20, 30]]]),
+        "cry": np.array([[[0, 100, 200, 300]]]),
+    }
 
-    gmtry, grid_r, grid_z, field = interp_inputs
-    mock_griddata.return_value = np.zeros((1, 1))
+    # Build a triangulation that surrounds the expected point
+    r = np.array([0.0, 50.0, 0.0, 50.0])
+    z = np.array([0.0, 0.0, 300.0, 300.0])
+    tri = build_triangulation(r, z)
 
-    interp_moments(gmtry, grid_r, grid_z, field, ind)
+    # Linear field → exact interpolation
+    field = r + z
 
-    args, _ = mock_griddata.call_args
-    r_passed, z_passed = args[2]
+    result = interp_moments(gmtry, tri, field, ind=ind)
 
-    assert np.allclose(r_passed, [[expected_r]])
-    assert np.allclose(z_passed, [[expected_z]])
+    expected = expected_r + expected_z
+
+    assert np.allclose(result[0, 0], expected)
 
 def test_interp_moments_linear_field():
     # Geometry (simple but nontrivial)
@@ -174,10 +197,12 @@ def test_interp_moments_linear_field():
     grid_r = np.array([0, 1, 0, 1])
     grid_z = np.array([0, 0, 1, 1])
 
+    tri = build_triangulation(grid_r, grid_z)
+
     # Linear field: f = r + 2z
     field = grid_r + 2 * grid_z
 
-    result = interp_moments(gmtry, grid_r, grid_z, field, ind=[0, 1, 2, 3])
+    result = interp_moments(gmtry, tri, field, ind=[0, 1, 2, 3])
 
     # Expected interpolation point
     r_expected = np.mean(gmtry["crx"][0, 0, :])
@@ -203,10 +228,11 @@ def test_interp_moments_properties(nx, ny, npts):
     # Interpolation points
     grid_r = np.random.rand(npts)
     grid_z = np.random.rand(npts)
+    tri = build_triangulation(grid_r, grid_z)
 
     field = np.random.rand(npts)
 
-    result = interp_moments(gmtry, grid_r, grid_z, field, ind=[0, 1, 2, 3])
+    result = interp_moments(gmtry, tri, field, ind=[0, 1, 2, 3])
 
     # ---- Properties ----
     assert result.shape == (nx, ny)
@@ -220,11 +246,11 @@ def test_interp_moments_warns_on_nonstandard_ind(mock_griddata):
         "cry": np.random.rand(1, 1, 4),
     }
 
-    grid_r = np.array([0.0])
-    grid_z = np.array([0.0])
-    field = np.array([1.0])
+    r = np.array([0.0, 1.0, 0.0, 1.0])
+    z = np.array([0.0, 0.0, 1.0, 1.0])
+    tri = build_triangulation(r, z)
 
-    mock_griddata.return_value = np.zeros((1, 1))
+    field = np.array([1.0, 2.0, 3.0, 4.0])
 
     with pytest.warns(UserWarning, match="non-standard ind"):
-        interp_moments(gmtry, grid_r, grid_z, field, ind=[1, 3])
+        interp_moments(gmtry, tri, field, ind=[1, 3])
