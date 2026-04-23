@@ -44,7 +44,7 @@ def get_genex_species(params):
     all_species = []
     for idx, sp in enumerate(names):
         if len(sp.strip())>0:
-            all_species.append(species(sp, charges[idx]))
+            all_species.append(species(sp.strip(), charges[idx]))
 
     return all_species
 
