@@ -142,7 +142,7 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
 
     tau = load_trace_genex(gpath, spec[0], "n").tau
     tau.attrs["norm"] = (norm.R0 / norm.c_s0).to("s")
-    time = (tau * tau.norm)[time_index].data.magnitude
+    time = (tau * tau.norm)[time_index].data.magnitude.item()
 
     return out, time
 
