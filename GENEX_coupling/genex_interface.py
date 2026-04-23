@@ -1,6 +1,7 @@
 from collections import defaultdict
 import f90nml
 from pathlib import Path
+import numpy as np
 import torx
 from torx.specializations.genex import (
     initialize_genex_from_filepath,
@@ -141,9 +142,9 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
 
     tau = load_trace_genex(gpath, spec[0], "n").tau
     tau.attrs["norm"] = (norm.R0 / norm.c_s0).to("s")
-    time = tau*tau.norm
+    time = (tau * tau.norm)[time_index].data.magnitude
 
-    return out, time[time_index]
+    return out, time
 
 
 def calculate_temperatures(params, norm, spec, n, u_par, E_par, E_perp):
