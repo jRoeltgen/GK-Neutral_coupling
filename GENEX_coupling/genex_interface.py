@@ -5,6 +5,7 @@ import torx
 from torx.specializations.genex import (
     initialize_genex_from_filepath,
     load_snaps_genex,
+    load_trace_genex,
 )
 from torx.measure import (
     parallel_temperature,
@@ -138,7 +139,11 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                                       get_field("Ttot", electrons[0]),
                                       get_field("Ttot", ions[0]), norm))
 
-    return out
+    tau = load_trace_genex(gpath, spec[0], "n").tau
+    tau.attrs["norm"] = (norm.R0 / norm.c_s0).to("s")
+    time = tau*tau.norm
+
+    return out, time[time_index]
 
 
 def calculate_temperatures(params, norm, spec, n, u_par, E_par, E_perp):

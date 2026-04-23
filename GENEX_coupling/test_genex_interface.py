@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock
 from torx.normalization.normalization_m import Normalization
 from pint import UnitRegistry
 from types import SimpleNamespace
+from pathlib import Path
 ureg = UnitRegistry()
 
 from collections import defaultdict
@@ -26,7 +27,8 @@ def fake_norm():
         "n0": 1.0e19 / (ureg.meter**(3)),
         "c_s0": 1.0 * ureg.meter / ureg.second,
         "elementary_charge": 1.0 * ureg.e,
-        "Mi": 2.0 * ureg.u
+        "Mi": 2.0 * ureg.u,
+        "R0": 1.0 * ureg.meter,
     })
 
 
@@ -121,15 +123,22 @@ def test_load_latest_genex_fields(
         patch("genex_interface.velocities_m") as mock_vel,
         patch("genex_interface.electrostatic_ExB_heat_flux") as mock_q,
         patch("genex_interface.calculate_temperatures") as mock_calc_temp,
-        patch("genex_interface.total_pressure") as mock_total_pressure
+        patch("genex_interface.total_pressure") as mock_total_pressure,
+        patch("genex_interface.load_trace_genex") as mock_trace
     ):
+
+        mock_da = MagicMock()
+        mock_da.tau = xr.DataArray([0.001])
+        mock_trace.return_value = mock_da
 
         # ---- mock data loading ----
         def fake_loader(path, spec, field):
             da = fake_data.copy()
-            da = da.expand_dims(tau=[0, 1])  # simulate time dimension
-            return da
 
+            # emulate "already time-indexed" output
+            da = da.expand_dims(tau=[0.0, 0.001])
+
+            return da
         mock_load.side_effect = fake_loader
 
         # ---- mock derived functions ----
@@ -152,8 +161,8 @@ def test_load_latest_genex_fields(
 
         mock_calc_temp.return_value = (fake_data, None, None)
 
-        out = load_latest_genex_fields(
-            gpath="path",
+        out, time = load_latest_genex_fields(
+            gpath=Path("path"),
             all_spec=fake_species,
             grid=fake_grid,
             equi="equi",
