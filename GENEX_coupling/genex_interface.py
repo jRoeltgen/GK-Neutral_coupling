@@ -16,9 +16,24 @@ from torx.measure import (
     electric_field
 )
 
-def initialize_genex(genex_path):
-    grid, equi, params, norm = initialize_genex_from_filepath(genex_path)
-    return grid, equi, params, norm
+def wait_for_genex_init(genex_path, timeout=300, poll=3):
+    import time
+    t0 = time.time()
+    last_err = None
+
+    while True:
+        try:
+            grid, equi, params, norm = initialize_genex_from_filepath(genex_path)
+            # minimal sanity checks
+            assert hasattr(grid, "r_u") and hasattr(grid, "z_u")
+            return grid, equi, params, norm
+        except Exception as e:
+            last_err = e
+
+        if time.time() - t0 > timeout:
+            raise TimeoutError(f"GENE-X init not ready: {last_err}")
+
+        time.sleep(poll)
 
 def get_genex_species(params):
     names = params['params_species']['names']
@@ -37,7 +52,8 @@ class species:
         self.charge = charge
         self.is_electron = charge<0
 
-def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm):
+def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
+                             time_index):
     """
     Load latest GENE-X data and compute derived quantities.
     """
@@ -77,7 +93,7 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm):
         return out[field][species]
 
     def load_field(field_name, species, norm_value):
-        da = load_snaps_genex(gpath, species, field_name).isel({"tau": -1})
+        da = load_snaps_genex(gpath, species, field_name).isel({"tau": time_index})
         da.attrs["norm"] = norm_value
         if species is None:
             set_field(field_name, NO_SPECIES, da)
@@ -101,7 +117,7 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm):
         load_field("Q_par", s, norm.Ti0 * norm.n0 * norm.c_s0)
         load_field("Q_perp", s, norm.Ti0 * norm.n0 * norm.c_s0)
 
-        set_field("Ttot",s, calculate_temperatures(gpath, params, norm, s,
+        set_field("Ttot",s, calculate_temperatures(params, norm, s,
                                 get_field("n",s), get_field("u_par",s),
                                 get_field("E_par",s), get_field("E_perp",s))[0])
 
@@ -120,7 +136,7 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm):
                                             get_field("E_perp",s)))
     set_field("pr", s, total_pressure(get_field("n",electrons[0]),
                                       get_field("Ttot", electrons[0]),
-                                      get_field("Ttot", ions[0]), norm).values)
+                                      get_field("Ttot", ions[0]), norm))
 
     return out
 
@@ -143,3 +159,6 @@ def toroidal_avg(genex_out):
         for s in genex_out[key].keys():
             out[key][s] = genex_out[key][s].mean(dim="phi", keep_attrs=True)
     return out
+
+def unnormalize(var):
+    return var*var.norm

@@ -4,12 +4,13 @@ import xarray as xr
 from unittest.mock import patch, MagicMock
 from torx.normalization.normalization_m import Normalization
 from pint import UnitRegistry
+from types import SimpleNamespace
 ureg = UnitRegistry()
 
 from collections import defaultdict
 
 from genex_interface import (
-    initialize_genex,
+    wait_for_genex_init,
     load_latest_genex_fields,
     calculate_temperatures,
     toroidal_avg,
@@ -55,13 +56,33 @@ def fake_species():
     ]
 
 @patch("genex_interface.initialize_genex_from_filepath")
-def test_initialize_genex(mock_init):
-    mock_init.return_value = ("grid", "equi", "params", "norm")
+def test_wait_for_genex_init_immediate_success(mock_init):
+    mock_grid = SimpleNamespace(r_u=1, z_u=1)
+    mock_init.return_value = (mock_grid, "equi", "params", "norm")
 
-    result = initialize_genex("path")
+    result = wait_for_genex_init("path", timeout=1, poll=0)
 
-    assert result == ("grid", "equi", "params", "norm")
+    assert result == (mock_grid, "equi", "params", "norm")
     mock_init.assert_called_once_with("path")
+
+@patch("genex_interface.initialize_genex_from_filepath")
+def test_wait_for_genex_init_retries_until_valid(mock_init):
+    calls = {"n": 0}
+
+    def fake_loader(path):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("not ready")
+
+        mock_grid = SimpleNamespace(r_u=1, z_u=1)
+        return mock_grid, "equi", "params", "norm"
+
+    mock_init.side_effect = fake_loader
+
+    result = wait_for_genex_init("dummy_path", timeout=1, poll=0)
+
+    assert result[0].r_u == 1
+    assert calls["n"] == 3
 
 @patch("genex_interface.parallel_temperature")
 @patch("genex_interface.perpendicular_temperature")
@@ -138,6 +159,7 @@ def test_load_latest_genex_fields(
             equi="equi",
             params="params",
             norm=fake_norm,
+            time_index=-1,
         )
 
         # ---- structure checks ----
@@ -195,6 +217,7 @@ def test_multiple_ions_raises(fake_grid, fake_norm):
             equi="equi",
             params="params",
             norm=fake_norm,
+            time_index=-1,
         )
 
 def test_multiple_electrons_raises(fake_grid, fake_norm):
@@ -212,6 +235,7 @@ def test_multiple_electrons_raises(fake_grid, fake_norm):
             equi="equi",
             params="params",
             norm=fake_norm,
+            time_index=-1,
         )
 
 def test_get_genex_species_basic():
