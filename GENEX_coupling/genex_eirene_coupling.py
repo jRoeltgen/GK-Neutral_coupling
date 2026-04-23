@@ -137,24 +137,6 @@ def unnormalize_all(genex_out):
 
 def interpolate_all_moments(gmtry, tri, genex_out):
     out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    # for field, field_block in genex_out.items():
-    #     if field == "poloidal_fluxes": # Not currently used
-    #         ind = [0,2]
-    #     elif field == "radial_fluxes": # Not currently used
-    #         ind = [2,3]
-    #     else:
-    #         ind = [0,1,2,3]
-    #     for species, value in field_block.items():
-    #         # 1. materialize only this array
-    #         print(value.chunks)
-    #         arr = value.data.compute()
-
-    #         # 2. interpolate immediately
-    #         out[field][species] = interp_moments(gmtry, tri, arr, ind)
-
-    #         # 3. drop reference (important for large loops)
-    #         del arr
-    #         #out[field][species] = interp_moments(gmtry, tri, value.values, ind)
     flattened = []
     keys = []
 
