@@ -1,7 +1,7 @@
 from collections import defaultdict
-import f90nml
 from pathlib import Path
 import numpy as np
+import time
 import torx
 from torx.specializations.genex import (
     initialize_genex_from_filepath,
@@ -103,6 +103,19 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
             set_field(field_name, species, da)
         return da
 
+    tau_arr = wait_until_genex_stable(
+        gpath,
+        spec,
+        check_interval=0.5,
+        stable_time=2.0,
+        timeout=120.0,
+    )
+    stable_idx = tau_arr.size - 1
+    if stable_idx >= time_index:
+        time_index = stable_idx
+    else:
+        raise ValueError(f"time_index {time_index} not less than or equal "
+                         f"to last stable index found ({stable_idx})")
 
     load_field("es_pot", None, (norm.Te0 / norm.elementary_charge).to("V"))
 
@@ -112,7 +125,9 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                                             norm=norm, component="radial")
 
     for s in spec:
+        print("Loading n",flush=True)
         load_field("n", s, norm.n0)
+        print("Loading u_par",flush=True)
         load_field("u_par", s, norm.c_s0)
         load_field("E_par", s, norm.Te0 * norm.n0)
         load_field("E_perp", s, norm.Te0 * norm.n0)
@@ -136,15 +151,11 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                                             get_field("es_pot", NO_SPECIES),
                                             get_field("E_par",s),
                                             get_field("E_perp",s)))
-    set_field("pr", s, total_pressure(get_field("n",electrons[0]),
+    set_field("pr", NO_SPECIES, total_pressure(get_field("n",electrons[0]),
                                       get_field("Ttot", electrons[0]),
                                       get_field("Ttot", ions[0]), norm))
 
-    tau = load_trace_genex(gpath, spec[0], "n").tau
-    tau.attrs["norm"] = (norm.R0 / norm.c_s0).to("s")
-    time = (tau * tau.norm)[time_index].data.magnitude.item()
-
-    return out, time
+    return out, tau_arr[-1]
 
 
 def calculate_temperatures(params, norm, spec, n, u_par, E_par, E_perp):
@@ -168,3 +179,71 @@ def toroidal_avg(genex_out):
 
 def unnormalize(var):
     return var*var.norm
+
+def get_mom_paths(genex_path):
+    parts = sorted(genex_path.glob("part_*/mom_2d.nc"))
+    if parts:
+        return parts
+    single = genex_path / "mom_2d.nc"
+    return [single] if single.exists() else []
+
+def get_tau_for_vars(genex_path, species):
+    vars_to_check = ["n", "K_perp"]
+
+    taus = []
+
+    for s in species:
+        for var in vars_to_check:
+            try:
+                da = load_snaps_genex(genex_path, s, var)
+                tau = da.coords["tau"].values
+                taus.append(tau)
+            except Exception:
+                return None  # mid-write or unavailable
+
+    # consistency check
+    ref = taus[0]
+    for t in taus[1:]:
+        if len(t) != len(ref) or (t != ref).any():
+            return None
+
+    return ref
+
+def wait_until_genex_stable(
+    genex_path,
+    species_list,
+    check_interval=0.5,
+    stable_time=2.0,
+    timeout=300.0,
+):
+    start = time.time()
+
+    last_tau = None
+    stable_start = None
+
+    while True:
+        if time.time() - start > timeout:
+            raise RuntimeError("GENE-X did not stabilize")
+
+        paths = get_mom_paths(genex_path)
+        if not paths:
+            time.sleep(check_interval)
+            continue
+
+        tau = get_tau_for_vars(genex_path, species_list)
+
+        if tau is None:
+            stable_start = None
+            time.sleep(check_interval)
+            continue
+
+        if last_tau is not None and np.array_equal(tau, last_tau):
+            if stable_start is None:
+                stable_start = time.time()
+            elif time.time() - stable_start >= stable_time:
+                return tau  # stable and consistent
+        else:
+            stable_start = None
+
+        last_tau = tau
+        time.sleep(check_interval)

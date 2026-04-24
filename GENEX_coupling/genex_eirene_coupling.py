@@ -30,11 +30,15 @@ def main(args, deps=None):
             replace=replace,
             pid_exists=psutil.pid_exists,
         )
+    print("Entered main ...", flush=True)
     eirene_path = Path(args.eirene_path)
     genex_path = Path(args.genex_path)
     edat, b2dat = eirene_interface(eirene_path, eirene_path)
+    print("Next genex init...", flush=True)
     grid, equi, params, norm = genex_interface.wait_for_genex_init(genex_path)
+    print("Getting genex species...", flush=True)
     genex_species = genex_interface.get_genex_species(params)
+    print("Getting genex electron name", flush=True)
     genex_electrons = get_genex_electron_name(genex_species)
     check_species_consistency(edat.species_names["bulk_ions"], genex_species)
     grid_r = grid.r_u*norm["R0"]
@@ -47,18 +51,13 @@ def main(args, deps=None):
     else:
         time_index = -1
     last_tau = -1
-    not_first_loop = False
     # Precompute triangulation
+    print("Build triangulation...", flush=True)
     tri = build_triangulation(grid_r.values, grid_z.values)
-    genex_fields, tau = wait_for_genex_ready(genex_path, grid, equi, params,
-                                            norm, time_index,
-                                            genex_species, timeout=600, poll=5)
+    print("Start main loop...", flush=True)
     while deps.pid_exists(args.pid):
-        if not_first_loop:
-            genex_fields, tau = wait_for_genex_ready(genex_path,
-                            genex_species, grid, equi, params, norm, time_index)
-        else:
-            not_first_loop = True
+        genex_fields, tau = genex_interface.load_latest_genex_fields(genex_path,
+                        genex_species, grid, equi, params, norm, time_index)
         print("tau=",tau)
         if (tau <= last_tau):
             deps.sleep(5)
@@ -75,7 +74,7 @@ def main(args, deps=None):
         print("write fort 31")
         edat.write_ft31(eirene_path / Path("fort.31"))
 
-        print(f"[{index}] Running EIRENE")
+        print(f"[{index}] Running EIRENE", flush=True)
         num_timeouts = 0
         eirene_time = args.eirene_time
         while num_timeouts<MAX_TIMEOUTS:
@@ -108,7 +107,7 @@ def main(args, deps=None):
 
         filename = args.filepattern + f"{index:06d}" + ".nc"
         filename_tmp = filename + ".tmp"
-        print(f"[{index}] Writing {filename_tmp}")
+        print(f"[{index}] Writing {filename_tmp}", flush=True)
         deps.write_nc(filename_tmp, interp_sources)
         deps.replace(filename_tmp, filename)
         index += 1
@@ -126,9 +125,9 @@ def get_genex_electron_name(genex_species):
 def check_species_consistency(eirene_species, genex_species):
     for sp in genex_species:
         if (sp.name not in eirene_species and not sp.is_electron):
-            raise ValueError(f"Genex Species {sp.name} not known to Eirene"
+            raise ValueError(f"Genex Species {sp.name} not known to Eirene. "
                              f"Eirene ion species are "
-                             f"{' ,'.join(eirene_species)}")
+                             f"{' ,'.join(eirene_species)}.")
 
 def unnormalize_all(genex_out):
     for field, field_block in genex_out.items():
@@ -155,28 +154,6 @@ def interpolate_all_moments(gmtry, tri, genex_out):
             ind = [0,1,2,3]
         out[field][species] = interp_moments(gmtry, tri, arr, ind)
     return out
-
-def wait_for_genex_ready(genex_path, grid, equi, params, norm, time_index,
-                         genex_species, timeout=300, poll=2):
-    import time
-
-    t0 = time.time()
-
-    while True:
-        try:
-            fields, tau = genex_interface.load_latest_genex_fields(genex_path,
-                            genex_species, grid, equi, params, norm, time_index)
-
-            if isinstance(tau, numbers.Number):
-                return (fields, tau) # ready
-
-        except Exception:
-            pass  # expected early on
-
-        if time.time() - t0 > timeout:
-            raise TimeoutError("GENE-X did not produce usable data in time")
-
-        time.sleep(poll)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="genex_eirene_coupling", description="Couple Gene-X and Eirene throught I/O and interpolate onto the other's grid")

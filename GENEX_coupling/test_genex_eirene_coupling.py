@@ -75,12 +75,6 @@ def coupling_env(monkeypatch, tmp_path):
     fields = {"es_pot": {"N/A": make_es_pot(1.0)}}
 
     monkeypatch.setattr(
-        mod,
-        "wait_for_genex_ready",
-        MagicMock(return_value=(fields, 0.001)),
-    )
-
-    monkeypatch.setattr(
         mod.genex_interface,
         "load_latest_genex_fields",
         MagicMock(return_value=(fields, 0.001)),
@@ -170,7 +164,7 @@ def test_main_multiple_iterations(coupling_env):
 
     env["deps"].pid_exists = MagicMock(side_effect=[True, True, True, False])
 
-    env["mod"].wait_for_genex_ready.side_effect = [
+    env["mod"].genex_interface.load_latest_genex_fields.side_effect = [
         (env["fields"], 0.001),
         (env["fields"], 0.01),
         (env["fields"], 0.1),
@@ -180,38 +174,6 @@ def test_main_multiple_iterations(coupling_env):
 
     assert env["deps"].run_eirene.call_count == 3
     assert env["deps"].write_nc.call_count == 3
-
-def test_wait_for_genex_ready_success(monkeypatch, coupling_env):
-    import genex_eirene_coupling as mod
-    env = coupling_env
-    make_es_pot = env["make_es_pot"]
-    fields = {"es_pot": {"N/A": make_es_pot(1.0)}}
-
-    monkeypatch.setattr(
-        mod.genex_interface,
-        "load_latest_genex_fields",
-        MagicMock(return_value=(fields, 0.001)),
-    )
-
-    result = mod.wait_for_genex_ready(
-        "path", None, None, None, None, -1, None, timeout=1, poll=0
-    )
-
-    assert result[1] is not None
-
-def test_wait_for_genex_ready_timeout(monkeypatch):
-    import genex_eirene_coupling as mod
-
-    monkeypatch.setattr(
-        mod.genex_interface,
-        "load_latest_genex_fields",
-        MagicMock(side_effect=RuntimeError("fail")),
-    )
-
-    with pytest.raises(TimeoutError):
-        mod.wait_for_genex_ready(
-            "path", None, None, None, None, -1, None, timeout=0.1, poll=0
-        )
 
 def test_unnormalize_all_mutates():
     import genex_eirene_coupling as mod
@@ -251,40 +213,6 @@ def test_check_species_consistency_raises():
         check_species_consistency(eirene_species, genex_species)
     assert "Genex Species T not known to Eirene" in str(exc.value)
 
-
-def test_main_first_vs_subsequent_loop_behavior(coupling_env):
-    env = coupling_env
-    mod = env["mod"]
-
-    make_es_pot = env["make_es_pot"]
-
-    # Force two loop iterations
-    env["deps"].pid_exists = MagicMock(side_effect=[True, True, False])
-
-    # Track calls
-    values = iter([
-        ({"es_pot": {"N/A": make_es_pot(1.0)}}, 0.001),
-        ({"es_pot": {"N/A": make_es_pot(2.0)}}, 0.002),
-    ])
-
-    wait_mock = MagicMock(side_effect=lambda *a, **k: next(values))
-    load_mock = MagicMock(
-        return_value=({"es_pot": {"N/A": make_es_pot(2.0)}}, 0.01)
-    )
-
-    mod.wait_for_genex_ready = wait_mock
-
-    # Run
-    mod.main(env["args"], deps=env["deps"])
-
-    # ---- Assertions ----
-
-    # Called once during second iteration
-    assert wait_mock.call_count == 2
-
-    # Ensure loop progressed enough to trigger second iteration
-    assert env["deps"].run_eirene.call_count >= 2
-
 def test_interpolate_all_moments_indices(monkeypatch):
     from genex_eirene_coupling import interpolate_all_moments
 
@@ -316,3 +244,20 @@ def test_interpolate_all_moments_indices(monkeypatch):
     assert calls[2] == [0, 1, 2, 3]
 
     assert result["poloidal_fluxes"]["D"] == {"ok": True}
+
+
+def test_main_tau_must_increase(coupling_env):
+    env = coupling_env
+    mod = env["mod"]
+
+    env["deps"].pid_exists = MagicMock(side_effect=[True, True, False])
+
+    env["mod"].genex_interface.load_latest_genex_fields.side_effect = [
+        (env["fields"], 0.02),
+        (env["fields"], 0.01),  # regression
+    ]
+
+    mod.main(env["args"], deps=env["deps"])
+
+    # second iteration skipped
+    assert env["deps"].run_eirene.call_count == 1

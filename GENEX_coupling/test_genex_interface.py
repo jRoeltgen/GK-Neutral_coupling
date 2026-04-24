@@ -124,12 +124,10 @@ def test_load_latest_genex_fields(
         patch("genex_interface.electrostatic_ExB_heat_flux") as mock_q,
         patch("genex_interface.calculate_temperatures") as mock_calc_temp,
         patch("genex_interface.total_pressure") as mock_total_pressure,
-        patch("genex_interface.load_trace_genex") as mock_trace
+        patch("genex_interface.wait_until_genex_stable") as mock_wait,
     ):
 
-        mock_da = MagicMock()
-        mock_da.tau = xr.DataArray([0.001])
-        mock_trace.return_value = mock_da
+        mock_wait.return_value = np.array([0.0, 0.001])
 
         # ---- mock data loading ----
         def fake_loader(path, spec, field):
@@ -171,6 +169,9 @@ def test_load_latest_genex_fields(
             time_index=-1,
         )
 
+        assert time == mock_wait.return_value[-1]
+        mock_wait.assert_called_once()
+
         # ---- structure checks ----
         assert "n" in out
         assert "u_par" in out
@@ -186,8 +187,10 @@ def test_load_latest_genex_fields(
             assert s in out["Ttot"]
             assert s in out["u_rad"]
 
-        # es_pot special case
+        # es_pot and pr special cases
         assert "N/A" in out["es_pot"]
+        assert "N/A" in out["pr"]
+        assert len(out["pr"]) == 1
 
         # radial velocity combination
         for s in spec:
@@ -195,6 +198,27 @@ def test_load_latest_genex_fields(
 
         # ensure temperature calculation called
         assert mock_calc_temp.call_count == len(spec)
+
+@patch("genex_interface.wait_until_genex_stable")
+@patch("genex_interface.load_snaps_genex")
+def test_load_latest_genex_fields_time_index_too_large(
+    mock_load, mock_wait, fake_grid, fake_norm, fake_species
+):
+    mock_wait.return_value = np.array([0.0, 1.0])
+
+    # Safety: ensure no data loading happens
+    mock_load.side_effect = AssertionError("Should not load data")
+
+    with pytest.raises(ValueError, match="time_index"):
+        load_latest_genex_fields(
+            gpath="path",
+            all_spec=fake_species,
+            grid=fake_grid,
+            equi="equi",
+            params="params",
+            norm=fake_norm,
+            time_index=5,
+        )
 
 def test_toroidal_avg(fake_data):
 
@@ -291,3 +315,138 @@ def test_get_genex_species_charge_alignment():
 
     assert result[0].charge == -2
     assert result[1].charge == 3
+
+def test_get_mom_paths_partitioned(tmp_path):
+    # create part directories
+    p1 = tmp_path / "part_0"
+    p1.mkdir()
+    (p1 / "mom_2d.nc").touch()
+
+    p2 = tmp_path / "part_1"
+    p2.mkdir()
+    (p2 / "mom_2d.nc").touch()
+
+    from genex_interface import get_mom_paths
+
+    result = get_mom_paths(tmp_path)
+
+    assert len(result) == 2
+    assert all(p.name == "mom_2d.nc" for p in result)
+
+
+def test_get_mom_paths_single_file(tmp_path):
+    f = tmp_path / "mom_2d.nc"
+    f.touch()
+
+    from genex_interface import get_mom_paths
+
+    result = get_mom_paths(tmp_path)
+
+    assert result == [f]
+
+
+def test_get_mom_paths_none(tmp_path):
+    from genex_interface import get_mom_paths
+
+    result = get_mom_paths(tmp_path)
+
+    assert result == []
+
+@patch("genex_interface.load_snaps_genex")
+def test_get_tau_for_vars_consistent(mock_load):
+    import xarray as xr
+    tau = np.array([0.0, 1.0, 2.0])
+
+    def fake_loader(path, spec, var):
+        return xr.DataArray(
+            np.zeros((3,)),
+            dims=("tau",),
+            coords={"tau": tau},
+        )
+
+    mock_load.side_effect = fake_loader
+
+    from genex_interface import get_tau_for_vars
+
+    result = get_tau_for_vars("path", ["e", "D"])
+
+    assert np.array_equal(result, tau)
+
+
+@patch("genex_interface.load_snaps_genex")
+def test_get_tau_for_vars_inconsistent(mock_load):
+    import xarray as xr
+
+    def fake_loader(path, spec, var):
+        if spec == "e":
+            tau = np.array([0.0, 1.0])
+        else:
+            tau = np.array([0.0, 2.0])
+        return xr.DataArray(
+            np.zeros((len(tau),)),
+            dims=("tau",),
+            coords={"tau": tau},
+        )
+
+    mock_load.side_effect = fake_loader
+
+    from genex_interface import get_tau_for_vars
+
+    result = get_tau_for_vars("path", ["e", "D"])
+
+    assert result is None
+
+
+@patch("genex_interface.load_snaps_genex")
+def test_get_tau_for_vars_exception(mock_load):
+    mock_load.side_effect = RuntimeError("mid-write")
+
+    from genex_interface import get_tau_for_vars
+
+    result = get_tau_for_vars("path", ["e"])
+
+    assert result is None
+
+@patch("genex_interface.get_tau_for_vars")
+@patch("genex_interface.get_mom_paths")
+def test_wait_until_genex_stable_success(mock_paths, mock_tau):
+    tau = np.array([0.0, 1.0])
+
+    mock_paths.return_value = ["dummy"]
+
+    # simulate: None → tau → tau (stable)
+    mock_tau.side_effect = [
+        None,
+        tau,
+        tau,
+        tau,
+    ]
+
+    from genex_interface import wait_until_genex_stable
+
+    result = wait_until_genex_stable(
+        "path",
+        ["e"],
+        check_interval=0.0,
+        stable_time=0.0,   # key: eliminate timing dependency
+        timeout=1.0,
+    )
+
+    assert np.array_equal(result, tau)
+
+@patch("genex_interface.get_tau_for_vars")
+@patch("genex_interface.get_mom_paths")
+def test_wait_until_genex_stable_timeout(mock_paths, mock_tau):
+    mock_paths.return_value = ["dummy"]
+    mock_tau.return_value = None
+
+    from genex_interface import wait_until_genex_stable
+
+    with pytest.raises(RuntimeError, match="did not stabilize"):
+        wait_until_genex_stable(
+            "path",
+            ["e"],
+            check_interval=0.0,
+            stable_time=0.0,
+            timeout=0.01,
+        )
