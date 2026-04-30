@@ -37,8 +37,8 @@ def sample_sources():
 @pytest.fixture
 def sample_temperatures():
     return {
-        "Ti": np.array([10.0]),
-        "Te": np.array([20.0]),
+        "Ti": 10.0,
+        "Te": 20.0,
     }
 
 
@@ -50,6 +50,8 @@ def test_write_sources_with_temperature(tmp_path, sample_sources,
     write_sources_nc(
         outfile,
         sample_sources,
+        dim_RZ=4,
+        dim_phi=5,
         temperature_values=sample_temperatures,
         write_temperature=True,
     )
@@ -60,24 +62,24 @@ def test_write_sources_with_temperature(tmp_path, sample_sources,
         assert "temperature_Ti" in nc.groups
         assert "temperature_Te" in nc.groups
 
-        for temp in ["Ti", "Te"]:
+        for i, temp in enumerate(["Ti", "Te"]):
 
             grp = nc.groups[f"temperature_{temp}"]
 
             # --- check attribute
-            assert grp.temp_id == temp
+            assert grp.temperature_id == np.int32(i+1)
 
             # --- check temperature variable exists
             assert "temperature" in grp.variables
 
             # --- check species groups
             for sp in ["D", "C"]:
-                assert f"species_{sp}" in grp.groups
+                assert f"{sp}" in grp.groups
 
-                sp_grp = grp.groups[f"species_{sp}"]
+                sp_grp = grp.groups[f"{sp}"]
 
                 for moment in ["density", "energy"]:
-                    varname = f"mom_{moment}"
+                    varname = f"{moment}"
 
                     assert varname in sp_grp.variables
 
@@ -85,7 +87,7 @@ def test_write_sources_with_temperature(tmp_path, sample_sources,
 
                     expected = sample_sources[moment][sp][temp]
 
-                    assert np.allclose(data, expected)
+                    assert np.allclose(data, expected.T)
 
 def test_write_sources_without_temperature(tmp_path, sample_sources):
 
@@ -94,28 +96,30 @@ def test_write_sources_without_temperature(tmp_path, sample_sources):
     write_sources_nc(
         outfile,
         sample_sources,
+        dim_RZ=4,
+        dim_phi=5,
         temperature_values=None,
         write_temperature=False,
     )
 
     with Dataset(outfile) as nc:
 
-        for temp in ["Ti", "Te"]:
+        for i, temp in enumerate(["Ti", "Te"]):
 
             grp = nc.groups[f"temperature_{temp}"]
 
             # --- attribute still exists
-            assert grp.temp_id == temp
+            assert grp.temperature_id == np.int32(i+1)
 
             # --- temperature variable should NOT exist
             assert "temperature" not in grp.variables
 
             for sp in ["D", "C"]:
-                sp_grp = grp.groups[f"species_{sp}"]
+                sp_grp = grp.groups[f"{sp}"]
 
                 for moment in ["density", "energy"]:
 
-                    varname = f"mom_{moment}"
+                    varname = f"{moment}"
 
                     assert varname in sp_grp.variables
 
@@ -123,7 +127,7 @@ def test_write_sources_without_temperature(tmp_path, sample_sources):
 
                     expected = sample_sources[moment][sp][temp]
 
-                    assert np.allclose(data, expected)
+                    assert np.allclose(data, expected.T)
 
 # --- Hypothesis strategy for sources dict ---
 @st.composite
@@ -164,40 +168,70 @@ def test_write_sources_property(data, write_temperature):
         write_sources_nc(
             outfile,
             sources,
+            dim_RZ=shape[0],
+            dim_phi=shape[1],
             temperature_values=temperature_values if write_temperature else None,
             write_temperature=write_temperature,
         )
 
         with Dataset(outfile) as nc:
             # --- global dimensions
-            assert "RZ" in nc.dimensions
-            assert "phi" in nc.dimensions
-            assert nc.dimensions["RZ"].size == shape[0]
-            assert nc.dimensions["phi"].size == shape[1]
+            assert "dim_RZ" in nc.dimensions
+            assert "dim_phi" in nc.dimensions
+            assert nc.dimensions["dim_RZ"].size == shape[0]
+            assert nc.dimensions["dim_phi"].size == shape[1]
 
+            # --- expected temperature groups (order-independent)
+            expected_groups = {
+                f"temperature_{t if t is not None else 'implicit'}"
+                for t in temps
+            }
+
+            assert set(nc.groups.keys()) == expected_groups
+
+            # --- build mapping: group_name -> temperature_id
+            ids = {
+                name: nc.groups[name].temperature_id
+                for name in nc.groups
+            }
+
+            # IDs should be consecutive starting at 1
+            assert sorted(ids.values()) == list(range(1, len(ids) + 1))
+
+            # --- iterate through groups
             for temp in temps:
                 grp_name = f"temperature_{temp if temp is not None else 'implicit'}"
-                assert grp_name in nc.groups
-
                 tgrp = nc.groups[grp_name]
 
-                # temp_id attribute always exists
-                expected_id = "implicit" if temp is None else str(temp)
-                assert tgrp.temp_id == expected_id
+                # --- temperature variable behavior
+                if temp is None:
+                    assert "temperature" not in tgrp.variables
 
-                # temperature variable only if write_temperature and not implicit
-                if write_temperature and temp is not None:
+                elif write_temperature:
                     assert "temperature" in tgrp.variables
-                    np.testing.assert_allclose(tgrp.variables["temperature"][:], [temperature_values[temp]])
+
+                    expected_temp = np.full(
+                        (shape[1], shape[0]),  # (dim_phi, dim_RZ)
+                        temperature_values[temp],
+                    )
+
+                    np.testing.assert_allclose(
+                        tgrp.variables["temperature"][:],
+                        expected_temp,
+                    )
                 else:
                     assert "temperature" not in tgrp.variables
 
-                # species groups
+                # --- species + moments
                 for sp in species:
-                    spgrp = tgrp.groups[f"species_{sp}"]
+                    spgrp = tgrp.groups[f"{sp}"]
+
                     for mom in moments:
-                        varname = f"mom_{mom}"
+                        varname = f"{mom}"
                         assert varname in spgrp.variables
-                        data = spgrp.variables[varname][:]
+
+                        data_nc = spgrp.variables[varname][:]
                         expected = sources[mom][sp][temp]
-                        np.testing.assert_allclose(data, expected)
+
+                        # writer stores (dim_phi, dim_RZ)
+                        np.testing.assert_allclose(data_nc, expected.T)
