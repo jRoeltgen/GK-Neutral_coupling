@@ -12,6 +12,7 @@ from collections import defaultdict
 
 from genex_interface import (
     wait_for_genex_init,
+    get_grid_with_ghost_filler,
     load_latest_genex_fields,
     calculate_temperatures,
     toroidal_avg,
@@ -57,18 +58,30 @@ def fake_species():
         species("D", +1),   # ion
     ]
 
+@pytest.fixture
+def mocked_io():
+    with patch("genex_interface.filepath_resolver") as mock_resolver, \
+         patch("genex_interface.xr.open_dataset") as mock_open:
+
+        mock_resolver.return_value = Path("mesh.nc")
+        yield mock_open
+
+@patch("genex_interface.get_grid_with_ghost_filler")
 @patch("genex_interface.initialize_genex_from_filepath")
-def test_wait_for_genex_init_immediate_success(mock_init):
+def test_wait_for_genex_init_immediate_success(mock_init, mock_grid_loader):
     mock_grid = SimpleNamespace(r_u=1, z_u=1)
     mock_init.return_value = (mock_grid, "equi", "params", "norm")
+    mock_grid_loader.return_value = ("r_all", "z_all", "compute_mask")
 
     result = wait_for_genex_init("path", timeout=1, poll=0)
 
-    assert result == (mock_grid, "equi", "params", "norm")
+    assert result == (mock_grid, "equi", "params", "norm", "r_all",
+                      "z_all", "compute_mask")
     mock_init.assert_called_once_with("path")
 
+@patch("genex_interface.get_grid_with_ghost_filler")
 @patch("genex_interface.initialize_genex_from_filepath")
-def test_wait_for_genex_init_retries_until_valid(mock_init):
+def test_wait_for_genex_init_retries_until_valid(mock_init, mock_grid_loader):
     calls = {"n": 0}
 
     def fake_loader(path):
@@ -80,11 +93,96 @@ def test_wait_for_genex_init_retries_until_valid(mock_init):
         return mock_grid, "equi", "params", "norm"
 
     mock_init.side_effect = fake_loader
+    mock_grid_loader.return_value = ("r_all", "z_all", "compute_mask")
 
     result = wait_for_genex_init("dummy_path", timeout=1, poll=0)
 
     assert result[0].r_u == 1
     assert calls["n"] == 3
+
+@pytest.mark.parametrize(
+    "coord_names,phi_dim,rvals,zvals,ghost,filler,expected",
+    [
+        (
+            ("R", "Z"),
+            "dim_phi",
+            [1,2,3],
+            [4,5,6],
+            [1,0,1],
+            [1,1,0],
+            [True,False,False],
+        ),
+        (
+            ("x", "y"),
+            "dim_phi",
+            [10,20],
+            [30,40],
+            [1,1],
+            [1,0],
+            [True,False],
+        ),
+        (
+            ("R", "Z"),
+            "dim_RZ_grid_phi",
+            [7,8],
+            [9,10],
+            [1,1],
+            [1,1],
+            [True,True],
+        ),
+    ]
+)
+def test_get_grid_valid_cases(
+    mocked_io,
+    coord_names,
+    phi_dim,
+    rvals,
+    zvals,
+    ghost,
+    filler,
+    expected,
+):
+    rname, zname = coord_names
+
+    ds = xr.Dataset({
+        rname: ((phi_dim, "n"), [rvals]),
+        zname: ((phi_dim, "n"), [zvals]),
+        "not_ghost": ((phi_dim, "n"), [ghost]),
+        "not_filler": ((phi_dim, "n"), [filler]),
+    })
+
+    mocked_io.return_value = ds
+
+    r, z, compute = get_grid_with_ghost_filler(Path("dummy"))
+
+    assert (r.values == rvals).all()
+    assert (z.values == zvals).all()
+    assert (compute.values == expected).all()
+
+def test_get_grid_unknown_dimension(mocked_io):
+    ds = xr.Dataset({
+        "R": (("foo", "n"), [[1,2]]),
+        "Z": (("foo", "n"), [[3,4]]),
+        "not_ghost": (("foo", "n"), [[1,1]]),
+        "not_filler": (("foo", "n"), [[1,1]]),
+    })
+
+    mocked_io.return_value = ds
+
+    with pytest.raises(NotImplementedError):
+        get_grid_with_ghost_filler(Path("dummy"))
+
+def test_get_grid_missing_mask(mocked_io):
+    ds = xr.Dataset({
+        "R": (("dim_phi", "n"), [[1]]),
+        "Z": (("dim_phi", "n"), [[2]]),
+        "not_filler": (("dim_phi", "n"), [[1]]),
+    })
+
+    mocked_io.return_value = ds
+
+    with pytest.raises(KeyError):
+        get_grid_with_ghost_filler(Path("dummy"))
 
 @patch("genex_interface.parallel_temperature")
 @patch("genex_interface.perpendicular_temperature")
@@ -167,6 +265,7 @@ def test_load_latest_genex_fields(
             params="params",
             norm=fake_norm,
             time_index=-1,
+            timeout=1,
         )
 
         assert time == mock_wait.return_value[-1]
@@ -218,6 +317,7 @@ def test_load_latest_genex_fields_time_index_too_large(
             params="params",
             norm=fake_norm,
             time_index=5,
+            timeout=1,
         )
 
 def test_toroidal_avg(fake_data):
@@ -251,6 +351,7 @@ def test_multiple_ions_raises(fake_grid, fake_norm):
             params="params",
             norm=fake_norm,
             time_index=-1,
+            timeout=1,
         )
 
 def test_multiple_electrons_raises(fake_grid, fake_norm):
@@ -269,6 +370,7 @@ def test_multiple_electrons_raises(fake_grid, fake_norm):
             params="params",
             norm=fake_norm,
             time_index=-1,
+            timeout=1,
         )
 
 def test_get_genex_species_basic():
