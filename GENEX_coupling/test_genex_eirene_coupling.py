@@ -3,7 +3,8 @@ from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
 from genex_eirene_coupling import (main, status, interpolate_all_moments,
                                    check_species_consistency,
-                                   interpolate_all_sources)
+                                   interpolate_all_sources_wrapper,
+                                   normalize_genex_params)
 import numpy as np
 import xarray as xr
 from collections import defaultdict
@@ -45,7 +46,13 @@ def coupling_env(monkeypatch, tmp_path):
     grid.r_u = xr.DataArray([1.0])
     grid.z_u = xr.DataArray([2.0])
 
+    r_all = grid.r_u
+    z_all = grid.z_u
+    compute = True
+
     norm = {"R0": 1.0}
+
+    params = {"params_species":{}}
 
     # ----------------------------
     # GENEX mocks
@@ -53,7 +60,7 @@ def coupling_env(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mod.genex_interface,
         "wait_for_genex_init",
-        MagicMock(return_value=(grid, None, None, norm)),
+        MagicMock(return_value=(grid, None, params, norm, r_all, z_all, compute)),
     )
 
     monkeypatch.setattr(
@@ -214,7 +221,6 @@ def test_check_species_consistency_raises():
     assert "Genex Species T not known to Eirene" in str(exc.value)
 
 def test_interpolate_all_moments_indices(monkeypatch):
-    from genex_eirene_coupling import interpolate_all_moments
 
     calls = []
 
@@ -261,3 +267,154 @@ def test_main_tau_must_increase(coupling_env):
 
     # second iteration skipped
     assert env["deps"].run_eirene.call_count == 1
+
+# ----------------------------------------------------------------------
+# normalize_genex_params tests
+# ----------------------------------------------------------------------
+
+def test_normalize_genex_params_strips_species_names():
+    params = {
+        "params_species": {
+            "names": [" ions ", " ELECTRONS", "impurity  "]
+        }
+    }
+
+    result = normalize_genex_params(params)
+
+    assert result["params_species"]["names"] == [
+        "ions",
+        "ELECTRONS",
+        "impurity",
+    ]
+
+
+def test_normalize_genex_params_missing_params_species():
+    params = {}
+
+    result = normalize_genex_params(params)
+
+    assert result is params
+    assert "params_species" not in result
+
+
+def test_normalize_genex_params_missing_names():
+    params = {
+        "params_species": {
+            "charge": [1, -1]
+        }
+    }
+
+    result = normalize_genex_params(params)
+
+    assert result["params_species"]["charge"] == [1, -1]
+
+
+def test_normalize_genex_params_modifies_in_place():
+    params = {
+        "params_species": {
+            "names": [" a ", " b "]
+        }
+    }
+
+    result = normalize_genex_params(params)
+
+    assert result is params
+    assert params["params_species"]["names"] == ["a", "b"]
+
+
+# ----------------------------------------------------------------------
+# interpolate_all_sources_wrapper tests
+# ----------------------------------------------------------------------
+
+def test_interpolate_wrapper_expands_mask_and_renames_electrons(monkeypatch):
+    compute = np.array([True, False, True, False])
+    grid_r = np.array([1.0, 2.0, 3.0, 4.0])
+    grid_z = np.array([5.0, 6.0, 7.0, 8.0])
+
+    sub_result = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    sub_result["mom1"]["ELECTRONS"]["src1"] = np.array([[10.0, 20.0]])
+    sub_result["mom1"]["IONS"]["src1"] = np.array([[30.0, 40.0]])
+
+    def fake_interpolate_all_sources(
+        tria, source_dict, r_sub, z_sub,
+        method="linear", fill_mode="constant", fill_value=0.0
+    ):
+        np.testing.assert_array_equal(r_sub, grid_r[compute])
+        np.testing.assert_array_equal(z_sub, grid_z[compute])
+        return sub_result
+
+    monkeypatch.setattr(
+        "genex_eirene_coupling.interpolate_all_sources",
+        fake_interpolate_all_sources
+    )
+
+    out = interpolate_all_sources_wrapper(
+        tria=None,
+        source_dict={},
+        grid_r=grid_r,
+        grid_z=grid_z,
+        compute=compute,
+        genex_electrons="species_ELECTRONS",
+    )
+
+    np.testing.assert_array_equal(
+        out["mom1"]["species_ELECTRONS"]["src1"],
+        np.array([[10.0, 0.0, 20.0, 0.0]])
+    )
+
+    np.testing.assert_array_equal(
+        out["mom1"]["IONS"]["src1"],
+        np.array([[30.0, 0.0, 40.0, 0.0]])
+    )
+
+
+def test_interpolate_wrapper_keeps_electrons_name_by_default(monkeypatch):
+    compute = np.array([True, True, False])
+
+    sub_result = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    sub_result["mom"]["ELECTRONS"]["src"] = np.array([[1.0, 2.0]])
+
+    def fake_interpolate_all_sources(*args, **kwargs):
+        return sub_result
+
+    monkeypatch.setattr(
+        "genex_eirene_coupling.interpolate_all_sources",
+        fake_interpolate_all_sources
+    )
+
+    out = interpolate_all_sources_wrapper(
+        tria=None,
+        source_dict={},
+        grid_r=np.array([1, 2, 3]),
+        grid_z=np.array([4, 5, 6]),
+        compute=compute,
+    )
+
+    assert "ELECTRONS" in out["mom"]
+
+
+def test_interpolate_wrapper_preserves_dtype(monkeypatch):
+    compute = np.array([False, True, True])
+
+    sub_result = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    sub_result["mom"]["IONS"]["src"] = np.array(
+        [[1, 2]], dtype=np.int32
+    )
+
+    def fake_interpolate_all_sources(*args, **kwargs):
+        return sub_result
+
+    monkeypatch.setattr(
+        "genex_eirene_coupling.interpolate_all_sources",
+        fake_interpolate_all_sources
+    )
+
+    out = interpolate_all_sources_wrapper(
+        tria=None,
+        source_dict={},
+        grid_r=np.array([1, 2, 3]),
+        grid_z=np.array([4, 5, 6]),
+        compute=compute,
+    )
+
+    assert out["mom"]["IONS"]["src"].dtype == np.int32

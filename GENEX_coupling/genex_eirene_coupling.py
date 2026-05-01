@@ -35,16 +35,19 @@ def main(args, deps=None):
     genex_path = Path(args.genex_path)
     edat, b2dat = eirene_interface(eirene_path, eirene_path)
     print("Next genex init...", flush=True)
-    grid, equi, params, norm = genex_interface.wait_for_genex_init(genex_path)
+    grid, equi, params, norm, r_all, z_all, compute = genex_interface.wait_for_genex_init(genex_path)
+    print("Normalize params", flush=True)
+    params = normalize_genex_params(params)
     print("Getting genex species...", flush=True)
     genex_species = genex_interface.get_genex_species(params)
     print("Getting genex electron name", flush=True)
     genex_electrons = get_genex_electron_name(genex_species)
     check_species_consistency(edat.species_names["bulk_ions"], genex_species)
-    grid_r = grid.r_u*norm["R0"]
-    grid_z = -grid.z_u*norm["R0"]
+    grid_r = np.asarray(r_all*norm["R0"])
+    grid_z = -np.asarray(z_all*norm["R0"])
     index = 0
     MAX_TIMEOUTS = args.MAX_TIMEOUTS
+    print("args.genex_time_index_override is ",args.genex_time_index_override)
     if args.genex_time_index_override:
         time_index = 0
         ntau = 40
@@ -53,12 +56,14 @@ def main(args, deps=None):
     last_tau = -1
     # Precompute triangulation
     print("Build triangulation...", flush=True)
-    tri = build_triangulation(grid_r.values, grid_z.values)
+    tri = build_triangulation(grid_r[compute], grid_z[compute])
     print("Start main loop...", flush=True)
+    timeout = 600
     while deps.pid_exists(args.pid):
         genex_fields, tau = genex_interface.load_latest_genex_fields(genex_path,
-                        genex_species, grid, equi, params, norm, time_index)
-        print("tau=",tau)
+                genex_species, grid, equi, params, norm, time_index, timeout)
+        timeout = 300
+        print("tau=",tau,flush=True)
         if (tau <= last_tau):
             deps.sleep(5)
             continue
@@ -68,6 +73,7 @@ def main(args, deps=None):
         print("Interpolate all moments:")
         interpolated = interpolate_all_moments(b2dat.gmtry, tri,
                                                genex_fields_2D)
+        del genex_fields_2D, genex_fields
         print("prepare fort 31")
         prepare_fort31(edat, interpolated, genex_electrons,
                      edat.species_names["bulk_ions"])
@@ -102,13 +108,17 @@ def main(args, deps=None):
             sources = edat.sources
         else:
             raise NotImplementedError("SumTemp=False not implemented")
-        interp_sources = interpolate_all_sources(edat.triangle_mesh, sources,
-                                                 grid_r, grid_z)
+
+        interp_sources = interpolate_all_sources_wrapper(
+            edat.triangle_mesh, sources,
+            grid_r, grid_z, compute,
+            genex_electrons=genex_electrons,
+        )
 
         filename = args.filepattern + f"{index:06d}" + ".nc"
         filename_tmp = filename + ".tmp"
         print(f"[{index}] Writing {filename_tmp}", flush=True)
-        deps.write_nc(filename_tmp, interp_sources)
+        deps.write_nc(filename_tmp, interp_sources, grid_r.size)
         deps.replace(filename_tmp, filename)
         index += 1
         last_tau = tau
@@ -153,6 +163,67 @@ def interpolate_all_moments(gmtry, tri, genex_out):
         else:
             ind = [0,1,2,3]
         out[field][species] = interp_moments(gmtry, tri, arr, ind)
+    return out
+
+def normalize_genex_params(params):
+    ps = params.get("params_species", {})
+    if "names" in ps:
+        ps["names"] = [n.strip() for n in ps["names"]]
+    return params
+
+def interpolate_all_sources_wrapper(
+    tria,
+    source_dict,
+    grid_r,
+    grid_z,
+    compute,
+    method="linear",
+    fill_mode="constant",
+    fill_value=0.0,
+    genex_electrons="ELECTRONS",
+):
+    """
+    Wrapper around interpolate_all_sources that:
+      1) Computes only on a subset of grid points
+      2) Expands results back to full grid with zeros elsewhere
+      3) Optionally renames the ELECTRONS species key
+    """
+
+    # Subselect grid
+    r_sub = grid_r[compute]
+    z_sub = grid_z[compute]
+
+    # Call original function (unchanged)
+    sub_out = interpolate_all_sources(
+        tria,
+        source_dict,
+        r_sub,
+        z_sub,
+        method=method,
+        fill_mode=fill_mode,
+        fill_value=fill_value,
+    )
+
+    # Prepare full output structure
+    out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    n_full = len(grid_r)
+
+    for mom, mom_block in sub_out.items():
+        for species, species_block in mom_block.items():
+            # Handle species renaming
+            target_species = (
+                genex_electrons if species == "ELECTRONS" else species
+            )
+
+            for source, values in species_block.items():
+                # values shape assumed (1, n_sub)
+                vals_sub = values.reshape(-1)
+
+                vals_full = np.zeros(n_full, dtype=vals_sub.dtype)
+                vals_full[compute] = vals_sub
+
+                out[mom][target_species][source] = vals_full.reshape(1, n_full)
+
     return out
 
 if __name__ == "__main__":
