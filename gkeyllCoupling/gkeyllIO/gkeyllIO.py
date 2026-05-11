@@ -16,7 +16,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 class gkeyll:
-    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5, extra_species = [], fast_reflection=True, final_cu_rec_coeff = 0.95, final_li_recyc_coeff = 0.99):
+    def __init__(self, filepath=None, name=None, half_domain=False, diffusivity=0.5, extra_species = [], fast_reflection=True, final_cu_rec_coeff = 0.99, final_li_recyc_coeff = 0.99):
         # Universal params
         self.mp = 1.67262192e-27
         self.me = 9.1093837e-31
@@ -243,6 +243,23 @@ class gkeyll:
                 #mom_data[species+"Temp"] =  (self.masses[species]/3) * (mom_data[species+"M2"] - mom_data[species+"M1"]**2 / mom_data[species+"M0"])/mom_data[species+"M0"] / self.eV
                 #mom_data[species+"Upar"] =  mom_data[species+"M1"]/mom_data[species+"M0"]
         
+            #Load bflux data
+            for species in ["elc", "ion", "molecule"]:
+                for bdry in ["ylower", "yupper"]:
+                    if isim in [0,1,4,5]:
+                        bflux_file = '%s-%s_bflux_%s_HamiltonianMoments_%d.gkyl'%(sim_name, species, bdry, frame)
+                        if os.path.exists(bflux_file):
+                            mdata = pg.GData(bflux_file)
+                            coeffs = mdata.get_values()
+                            mom_data[species+'M1'+bdry] = mdata.get_values()[:,0:2]
+
+            #Correct the Flux based on bflux ratio
+            for species in ["elc", "ion", "molecule"]:
+                if isim in [0,1]:
+                    mom_data[species+"M1"][:,0,:] = mom_data[species+"M1"][:,0,:]*np.abs(mom_data[species+"M1"+"ylower"][:,0]/mom_data[species+"M1"][:,0,0])[:, np.newaxis]
+                if isim in [4,5]:
+                    mom_data[species+"M1"][:,-1,:] = mom_data[species+"M1"][:,-1,:]*np.abs(mom_data[species+"M1"+"yupper"][:,0]/mom_data[species+"M1"][:,-1,0])[:, np.newaxis]
+
             # Load the potential
             mdata = pg.GData('%s-field_%d.gkyl'%(sim_name, frame))
             mom_data["phi"] = mdata.get_values()
@@ -397,35 +414,15 @@ class gkeyll:
             raw_mom_data["J"] = jdata.get_values()[:,:,0]/2
             raw_grid = jdata.get_grid()
             geo_fac = 1/mom_data["J"]/mom_data["B"]
-        
+
             #Load grid data
-            node_data = pg.GData(sim_name+"-nodes.gkyl")
-            vals = node_data.get_values()
-            R = vals[:,:,0]
-            Z = vals[:,:,1]
-            PHI = vals[:,:,2]
-            mom_data["R"] = R
-            mom_data["Z"] = Z
-        
-            #Get interpolated physical coords
-            temp_nodal_grid = node_data.get_grid()
-            nodal_grid = []
-            for d in range(0,len(temp_nodal_grid)):
-                nodal_grid.append( np.linspace(temp_nodal_grid[d][0], temp_nodal_grid[d][-1], len(temp_nodal_grid[d])-1) )
-        
-            Rinterpolator = RegularGridInterpolator((nodal_grid[0], nodal_grid[1]), R)
-            Zinterpolator = RegularGridInterpolator((nodal_grid[0], nodal_grid[1]), Z)
-            g0, g1 = np.meshgrid(grid[0], grid[1])
-            R = Rinterpolator((g0,g1))
-            Z = Zinterpolator((g0, g1))
-        
-            g0i, g1i = np.meshgrid(self.__fix_gridvals(grid[0]), self.__fix_gridvals(grid[1]))
-            Ri = Rinterpolator((g0i,g1i))
-            Zi = Zinterpolator((g0i, g1i))
-        
-            mom_data["Ri"] = Ri.T
-            mom_data["Zi"] = Zi.T
-        
+            mc2pdata = pg.GData(sim_name + "-mapc2p_deflated.gkyl")
+            _ ,R = pg.data.GInterpModal(mc2pdata,poly_order=1,basis_type='ms').interpolate(0)
+            _ ,Z = pg.data.GInterpModal(mc2pdata,poly_order=1,basis_type='ms').interpolate(1)
+
+            mom_data["Ri"] = R.squeeze()
+            mom_data["Zi"] = Z.squeeze()
+
             #Load moment data
             for species in self.species_list:
                 for mom in ["M0", "M1", "M2"]:
@@ -809,16 +806,16 @@ class gkeyll:
     def populate_ft31(self, b2dat, edat):
         ft31 = edat.fort31
 
+        zero_volume_keys = ["na"]
+        duplicated_volume_keys = ["ua", "up", "ww", "vv"]
+
         if self.fast_reflection:
-            zero_volume_keys = ["na"]
             for key in zero_volume_keys:
                 last_col = np.zeros_like(self.interpolated_data[key][:,:,-1])
                 self.interpolated_data[key] = np.dstack((self.interpolated_data[key], last_col, last_col, last_col))
-            duplicated_volume_keys = ["ua", "up", "ww", "vv"]
             for key in duplicated_volume_keys:
                 last_col = self.interpolated_data[key][:,:,-1].copy()
                 self.interpolated_data[key] = np.dstack((self.interpolated_data[key], last_col, last_col, last_col))
-
 
         #Volume data
         ft31["na"] = self.interpolated_data["na"]
