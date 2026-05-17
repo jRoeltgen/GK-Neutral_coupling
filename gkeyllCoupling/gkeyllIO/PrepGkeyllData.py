@@ -34,6 +34,10 @@ gkeyll_simulation_name = paths['gkeyll_simulation_name']
 gkeyll_half_domain = gkeyll_options['half_domain']
 gkeyll_diffusivity = gkeyll_options['diffusivity']
 gkeyll_extra_species = gkeyll_options['extra_species']
+gkeyll_plate_material = gkeyll_options['plate_material']
+gkeyll_wall_material = gkeyll_options['wall_material']
+gkeyll_plate_rec_coeff = gkeyll_options['final_plate_rec_coeff']
+gkeyll_wall_rec_coeff = gkeyll_options['final_wall_rec_coeff']
 
 # Ensure extra_species is a list
 if not isinstance(gkeyll_extra_species, list):
@@ -48,7 +52,7 @@ gkeyll_text_output_path = paths['gkeyll_text_output_path']
 frame = int(np.genfromtxt(gkeyll_text_output_path+"new_data_flag"))
 
 #Second load data
-g = gkeyllIO.gkeyll(gkeyll_data_path, gkeyll_simulation_name, gkeyll_half_domain, gkeyll_diffusivity, gkeyll_extra_species)
+g = gkeyllIO.gkeyll(gkeyll_data_path, gkeyll_simulation_name, gkeyll_half_domain, gkeyll_diffusivity, gkeyll_extra_species, final_plate_rec_coeff = gkeyll_plate_rec_coeff, final_wall_rec_coeff=gkeyll_wall_rec_coeff, plate_material = gkeyll_plate_material, wall_material = gkeyll_wall_material)
 g.read_geometry()
 g.read_data(frame)
 g.read_coeffs(frame)
