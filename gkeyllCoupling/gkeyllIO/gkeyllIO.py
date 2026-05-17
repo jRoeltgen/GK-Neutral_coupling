@@ -263,9 +263,9 @@ class gkeyll:
             #Correct the Flux based on bflux ratio
             for species in self.species_list:
                 if isim in [0,1]:
-                    mom_data[species+"M1"][:,0,:] = mom_data[species+"M1"][:,0,:]*np.abs(mom_data[species+"M1"+"ylower"][:,0]/mom_data[species+"M1"][:,0,0])[:, np.newaxis]
+                    mom_data[species+"M1"][:,0,:] = mom_data[species+"M1"][:,0,:]*np.abs( (mom_data[species+"M1"+"ylower"][:,0] * 1/np.sqrt(2) ) / (mom_data[species+"M1"][:,0,0] * 1/2 ) )[:, np.newaxis]
                 if isim in [4,5]:
-                    mom_data[species+"M1"][:,-1,:] = mom_data[species+"M1"][:,-1,:]*np.abs(mom_data[species+"M1"+"yupper"][:,0]/mom_data[species+"M1"][:,-1,0])[:, np.newaxis]
+                    mom_data[species+"M1"][:,-1,:] = mom_data[species+"M1"][:,-1,:]*np.abs( (mom_data[species+"M1"+"yupper"][:,0] * 1/np.sqrt(2) ) / (mom_data[species+"M1"][:,-1,0] * 1/2 ))[:, np.newaxis]
 
             # Load the potential
             mdata = pg.GData('%s-field_%d.gkyl'%(sim_name, frame))
@@ -876,6 +876,8 @@ class gkeyll:
         ft31["ti"] = self.interpolated_data["ti"]
         ft31["pr"] = self.interpolated_data["pr"]
         ft31["po"] = self.interpolated_data["po"]
+
+        return ft31
 
 
 

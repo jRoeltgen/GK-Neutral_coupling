@@ -28,9 +28,7 @@ gkeyll_simulation_name = paths['gkeyll_simulation_name']
 eirene_data_path = paths['eirene_data_path']
 gkeyll_text_input_path = paths['gkeyll_text_input_path']
 gkeyll_extra_species = gkeyll_options['extra_species']
-include_molecules = False
-if "molecule" in gkeyll_extra_species:
-    include_molecules = True
+include_molecules = True if gkeyll_extra_species is not None else False
 
 # Block range
 bmin = config['gkeyll_options']['bmin']
