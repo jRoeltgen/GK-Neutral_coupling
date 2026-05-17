@@ -835,11 +835,10 @@ class gkeyll:
         ft31["ww"] = self.interpolated_data["ww"]
         ft31["ua"] = self.interpolated_data["ua"]
 
-        if self.fast_reflection:
-            dummy_keys = ["dummy3D", "uadia", "vadia"]
-            for key in dummy_keys:
-                ft31[key] = np.zeros_like(ft31["na"])
-            ft31["ion_charge"] = np.ones_like(ft31["na"])
+        dummy_keys = ["dummy3D", "uadia", "vadia"]
+        for key in dummy_keys:
+            ft31[key] = np.zeros_like(ft31["na"])
+        ft31["ion_charge"] = np.ones_like(ft31["na"])
 
         if self.fast_reflection:
             PlateCoeff = self.Plateinterpolator(self.interpolated_surfz_data['em'])
