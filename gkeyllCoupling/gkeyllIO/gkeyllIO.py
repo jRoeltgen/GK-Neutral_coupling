@@ -244,7 +244,7 @@ class gkeyll:
                 #mom_data[species+"Upar"] =  mom_data[species+"M1"]/mom_data[species+"M0"]
         
             #Load bflux data
-            for species in ["elc", "ion", "molecule"]:
+            for species in self.species_list:
                 for bdry in ["ylower", "yupper"]:
                     if isim in [0,1,4,5]:
                         bflux_file = '%s-%s_bflux_%s_HamiltonianMoments_%d.gkyl'%(sim_name, species, bdry, frame)
@@ -254,7 +254,7 @@ class gkeyll:
                             mom_data[species+'M1'+bdry] = mdata.get_values()[:,0:2]
 
             #Correct the Flux based on bflux ratio
-            for species in ["elc", "ion", "molecule"]:
+            for species in self.species_list:
                 if isim in [0,1]:
                     mom_data[species+"M1"][:,0,:] = mom_data[species+"M1"][:,0,:]*np.abs(mom_data[species+"M1"+"ylower"][:,0]/mom_data[species+"M1"][:,0,0])[:, np.newaxis]
                 if isim in [4,5]:

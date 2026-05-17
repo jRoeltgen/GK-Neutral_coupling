@@ -14,6 +14,7 @@ with open(config_file, 'r') as f:
 
 # Extract paths from config
 paths = config['paths']
+gkeyll_options = config['gkeyll_options']
 
 target_dir = paths['lib_path'] + "common/"
 sys.path.insert(0, target_dir)
@@ -26,6 +27,10 @@ gkeyll_data_path = paths['gkeyll_data_path']
 gkeyll_simulation_name = paths['gkeyll_simulation_name']
 eirene_data_path = paths['eirene_data_path']
 gkeyll_text_input_path = paths['gkeyll_text_input_path']
+gkeyll_extra_species = gkeyll_options['extra_species']
+include_molecules = False
+if "molecule" in gkeyll_extra_species:
+    include_molecules = True
 
 # Block range
 bmin = config['gkeyll_options']['bmin']
@@ -67,9 +72,10 @@ pesource = edat.sources["particle"]["ELECTRONS"]["SUM"]
 mesource = 0.0
 eesource = edat.sources["energy"]["ELECTRONS"]["SUM"]
 
-pmsource = edat.sources["particle"][molecule]["SUM"]
-mmsource = 0.0
-emsource = edat.sources["energy"]["TEST IONS"]["SUM"]
+if include_molecules:
+    pmsource = edat.sources["particle"][molecule]["SUM"]
+    mmsource = 0.0
+    emsource = edat.sources["energy"]["TEST IONS"]["SUM"]
 
 # Step 1: load the Gkeyll grid information
 #     same as process_eirene_output.py's Step 1
@@ -99,9 +105,10 @@ M0e_list = []
 M2e_list = []
 M1e_list = []
 
-M0m_list = []
-M2m_list = []
-M1m_list = []
+if include_molecules:
+    M0m_list = []
+    M2m_list = []
+    M1m_list = []
 for i, simName in enumerate(simNames):
     nx, nz = Rlist[i].shape
     M0i = np.zeros((nx,nz))
@@ -124,17 +131,20 @@ for i, simName in enumerate(simNames):
             # ni = PAEL * 1e6/eV
             M0i[ix,iz] = pisource[linidx]/eV*1e6
             M0e[ix,iz] = pesource[linidx]/eV*1e6
-            M0m[ix,iz] = pmsource[linidx]/eV*1e6
 
             # M1 source calculation
             M1i[ix,iz] = misource[linidx]*10/mass_ion/eV
             M1e[ix,iz] = 0.0 
-            M1m[ix,iz] = 0.0 
 
             # M2 source Calculation
             M2i[ix,iz] = eisource[linidx]*1e6/mass_ion*2.0
             M2e[ix,iz] = eesource[linidx]*1e6/mass_elc*2.0
-            M2m[ix,iz] = emsource[linidx]*1e6/mass_molecule*2.0
+
+
+            if include_molecules:
+                M0m[ix,iz] = pmsource[linidx]/eV*1e6
+                M1m[ix,iz] = 0.0 
+                M2m[ix,iz] = emsource[linidx]*1e6/mass_molecule*2.0
 
 
     # Smooth data
@@ -147,9 +157,10 @@ for i, simName in enumerate(simNames):
     M0e_list.append(M0e)
     M1e_list.append(M1e)
     M2e_list.append(M2e)
-    M0m_list.append(M0m)
-    M1m_list.append(M1m)
-    M2m_list.append(M2m)
+    if include_molecules:
+        M0m_list.append(M0m)
+        M1m_list.append(M1m)
+        M2m_list.append(M2m)
 
 ## Step 3: Write nodal data to text file 
 
@@ -159,14 +170,14 @@ for i, fname in enumerate(fNames):
     np.savetxt(gkeyll_text_input_path+fname+"-ion_M1source.txt", M1i_list[i].flatten())
     np.savetxt(gkeyll_text_input_path+fname+"-ion_M2source.txt", M2i_list[i].flatten())
 
-
     np.savetxt(gkeyll_text_input_path+fname+"-elc_M0source.txt", M0e_list[i].flatten())
     np.savetxt(gkeyll_text_input_path+fname+"-elc_M1source.txt", M1e_list[i].flatten())
     np.savetxt(gkeyll_text_input_path+fname+"-elc_M2source.txt", M2e_list[i].flatten())
 
-    np.savetxt(gkeyll_text_input_path+fname+"-molecule_M0source.txt", M0m_list[i].flatten())
-    np.savetxt(gkeyll_text_input_path+fname+"-molecule_M1source.txt", M1m_list[i].flatten())
-    np.savetxt(gkeyll_text_input_path+fname+"-molecule_M2source.txt", M2m_list[i].flatten())
+    if include_molecules:
+        np.savetxt(gkeyll_text_input_path+fname+"-molecule_M0source.txt", M0m_list[i].flatten())
+        np.savetxt(gkeyll_text_input_path+fname+"-molecule_M1source.txt", M1m_list[i].flatten())
+        np.savetxt(gkeyll_text_input_path+fname+"-molecule_M2source.txt", M2m_list[i].flatten())
 
             
 print("Finished converting text to Gkeyll input")   
@@ -181,9 +192,10 @@ M2iall = np.array([])
 M0eall = np.array([])
 M1eall = np.array([])
 M2eall = np.array([])
-M0mall = np.array([])
-M1mall = np.array([])
-M2mall = np.array([])
+if include_molecules:
+    M0mall = np.array([])
+    M1mall = np.array([])
+    M2mall = np.array([])
 for i in range(8):
     Rall=np.append(Rall,Rlist[i].flatten())
     Zall=np.append(Zall,Zlist[i].flatten())
@@ -195,7 +207,8 @@ for i in range(8):
     M1eall=np.append(M1eall,M1e_list[i].flatten())
     M2eall=np.append(M2eall,M2e_list[i].flatten())
 
-    M0mall=np.append(M0mall,M0m_list[i].flatten())
-    M1mall=np.append(M1mall,M1m_list[i].flatten())
-    M2mall=np.append(M2mall,M2m_list[i].flatten())
+    if include_molecules:
+        M0mall=np.append(M0mall,M0m_list[i].flatten())
+        M1mall=np.append(M1mall,M1m_list[i].flatten())
+        M2mall=np.append(M2mall,M2m_list[i].flatten())
 

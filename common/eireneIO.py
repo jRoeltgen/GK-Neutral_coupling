@@ -419,7 +419,7 @@ class eirene:
             add_cells = int(lines_list[header_lines-1].split()[4])-1 - Ncells
             start_line = header_lines
             while x*Ncells < len(lines_list):
-                current_source = np.array([float(s.split()[2]) for s in lines_list[start_line:start_line+Ncells]])
+                current_source = np.array([safe_float(s.split()[2]) for s in lines_list[start_line:start_line+Ncells]])
                 species = lines_list[start_line-5].strip()
                 units   = lines_list[start_line-4].strip()
                 moment_code = current_file.suffix[-3]
@@ -517,7 +517,7 @@ class eirene:
         data = []
         for line in lines[idx:]:
             if line.strip():
-                data.extend(map(float, line.split()))
+                data.extend(map(safe_float, line.split()))
 
         data = np.array(data, dtype=np.float64)
 
@@ -1034,12 +1034,12 @@ class eirene:
                         my_list = line.split()
                         for v in my_list:
                             if "E" in v:
-                                numbers.append(float(v))
+                                numbers.append(safe_float(v))
                             else:
                                 if "+" in v:
-                                    numbers.append(float(v.replace("+","E+")))
+                                    numbers.append(safe_float(v.replace("+","E+")))
                                 else:
-                                    numbers.append(float("E-".join(v.rsplit("-",1))))
+                                    numbers.append(safe_float("E-".join(v.rsplit("-",1))))
 
                     values.extend(numbers)
                 field[:, j, i] = values[:nx]

@@ -120,6 +120,7 @@ class gkeyllTracer:
         self.compression_factor = gridspec.get("compression_factor", None)
         self.radial_compression_factor = gridspec.get("radial_compression_factor", None)
         self.width = gridspec.get("width", None)
+        self.compress_divertor = gridspec.get("compress_divertor", None)
 
         self.arc_ctx = { }
         self.plate_ctx = { }
@@ -680,12 +681,20 @@ class gkeyllTracer:
             self.mapzcut = self.maplen/2.0
         elif self.ftype in ("GKYL_PF_LO_R", "GKYL_PF_UP_L", "GKYL_DN_SOL_OUT_LO", "GKYL_DN_SOL_IN_UP"):
             self.maplen = self.theta_up - self.theta_lo
-            self.mapzcenter = self.theta_lo
-            self.mapzcut = self.maplen
+            if self.compress_divertor:
+                self.mapzcenter = self.theta_lo + self.maplen/2.0
+                self.mapzcut = self.maplen/2.0
+            else:
+                self.mapzcenter = self.theta_lo
+                self.mapzcut = self.maplen
         elif self.ftype in ("GKYL_PF_LO_L", "GKYL_PF_UP_R", "GKYL_DN_SOL_OUT_UP", "GKYL_DN_SOL_IN_LO"):
             self.maplen = self.theta_up - self.theta_lo
-            self.mapzcenter = self.theta_up
-            self.mapzcut = self.maplen
+            if self.compress_divertor:
+                self.mapzcenter = self.theta_up - self.maplen/2.0
+                self.mapzcut = self.maplen/2.0
+            else:
+                self.mapzcenter = self.theta_up
+                self.mapzcut = self.maplen
 
         if self.compression_factor!=None:
             uniform_coordinate = theta

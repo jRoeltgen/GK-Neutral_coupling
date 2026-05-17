@@ -3,7 +3,7 @@ import gkeyllGeometry.gkeyllEFIT as gkeyllEFIT
 import numpy as np
 
 def shaped_pfunc_lower_outer(s):
-    p0 = np.array([5.488 - 0.6, -8.600])
+    p0 = np.array([5.488 - 0.6, -8.538])
     p1 = np.array([5.855 - 0.6, -8.52318])
 
     # Extrapolate p1 outward
@@ -16,7 +16,7 @@ def shaped_pfunc_lower_outer(s):
 
 
 def shaped_pfunc_upper_outer(s):
-    p0 = np.array([5.488 - 0.6, 8.600])
+    p0 = np.array([5.488 - 0.6, 8.538])
     p1 = np.array([5.855 - 0.6, 8.52318])
 
     # Extrapolate p1 outward
