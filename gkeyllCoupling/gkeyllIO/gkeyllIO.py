@@ -773,6 +773,10 @@ class gkeyll:
         self.interpolated_data["ti"][self.interpolated_data["ti"] < 0] = 1.0e3*self.eV
         self.interpolated_data["te"][self.interpolated_data["te"] < 0] = 1.0e3*self.eV
 
+        # Apply some caps
+        self.interpolated_data["ti"][self.interpolated_data["ti"] > 10000*self.eV] = 1.0e3*self.eV
+        self.interpolated_data["te"][self.interpolated_data["te"] > 10000*self.eV] = 1.0e3*self.eV
+
         self.interpolated_data["pr"] = self.interpolated_data["na"][:,:,0] * self.interpolated_data["ti"]  + self.interpolated_data["elcM0"] * self.interpolated_data["te"]
         if(len(self.species_list)>2):
             for i in range(2, len(self.species_list)):
