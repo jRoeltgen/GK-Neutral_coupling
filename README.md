@@ -19,5 +19,6 @@ Within the gkeyllCoupling folder are three subfolders:
 
 
 # Dependencies
-For All Coupling : numpy, scipy, filecmp, colorama, hypothesis, 
+For All Coupling : numpy, scipy, filecmp, colorama, hypothesis
+
 Additionally For Gkeyll Coupling : postgkyl
