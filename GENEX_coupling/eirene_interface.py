@@ -3,12 +3,12 @@ import B2IO
 import triangle_mesh
 from EireneInputParser import EireneInputParser
 from pathlib import Path
+import scipy.constants as pyconst
 import subprocess
 import numpy as np
 import os
 import signal
 import enum
-
 class status(enum.IntEnum):
     SUCCESS = 0
     TIMEOUT = -1
@@ -24,6 +24,7 @@ def eirene_interface(eirene_path, b2_path):
     #   in python. It can then write the fort.33/34/35 files using the
     #   triangle_mesh class. It appears the writing of input.dat is independent
     #   of the mesh (uinp is called before b2ag in triang).
+    # Assumes fluxes in fort.31 already have correct elements zeroed out.
     b2dat = B2IO.B2(b2_path)
 
     eip = EireneInputParser(eirene_path / Path("input.dat"))
@@ -37,10 +38,16 @@ def eirene_interface(eirene_path, b2_path):
     ny = edat.plasma_gmtry["ny"]
 
     edat.read_ft31(eirene_path / Path("fort.31"), nx+2, ny+2, ns)
+    if edat.fort31["fnax"].ndim == 3:
+        pol_mask = edat.fort31["fnax"][:,:,0] == 0
+        rad_mask = edat.fort31["fnay"][:,:,0] == 0
+    else:
+        pol_mask = edat.fort31["fnax"] == 0
+        rad_mask = edat.fort31["fnay"] == 0
 
     edat.triangle_mesh.calc_incenter()
 
-    return edat, b2dat
+    return edat, b2dat, pol_mask, rad_mask
 
 def prepare_fort31(edat, genex_data, eorder, iorder):
     # vExB = ExB_velocity() see analyze_moments.py
@@ -57,12 +64,14 @@ def prepare_fort31(edat, genex_data, eorder, iorder):
     edat.fort31["up"] = upol
     edat.fort31["vv"] = urad
     edat.fort31["ww"] = dict_to_array(genex_data["u_phi"], iorder, edat.fort31["ww"].shape)
-    edat.fort31["te"] = dict_to_array(genex_data["Ttot"], eorder, edat.fort31["te"].shape)
-    edat.fort31["ti"] = dict_to_array(genex_data["Ttot"], iorder, edat.fort31["ti"].shape)
+    edat.fort31["te"] = dict_to_array(genex_data["Ttot"], eorder,
+                                      edat.fort31["te"].shape) * pyconst.elementary_charge
+    edat.fort31["ti"] = dict_to_array(genex_data["Ttot"], iorder,
+                                      edat.fort31["ti"].shape) * pyconst.elementary_charge
     edat.fort31["ua"] = upar
     # pitch angle - constant in time
-    edat.fort31["fnax"] = upol * edat.fort31["na"]
-    edat.fort31["fnay"] = urad * edat.fort31["na"]
+    edat.fort31["fnax"] = upol * dict_to_array(genex_data["fnax"], iorder, edat.fort31["fnax"].shape)
+    edat.fort31["fnay"] = urad * dict_to_array(genex_data["fnay"], iorder, edat.fort31["fnay"].shape)
     edat.fort31["uadia"] = np.zeros((edat.fort31["uadia"].shape))
     edat.fort31["vadia"] = np.zeros((edat.fort31["vadia"].shape))
     edat.fort31["po"] = dict_to_array(genex_data["es_pot"], None)
@@ -92,14 +101,16 @@ def dict_to_array(dict_in, order, dim=None):
             f"Dimensions of new fort.31 field {arr.shape} don't match original: {dim}")
     return arr
 
-def run_eirene(Eirene_time, eirene_path, command="eirobjx"):
+def run_eirene(Eirene_time, eirene_path, command="eirobjx", solpstop=""):
     output_file = eirene_path / Path("run.log")
     try:
         with open(output_file, "w") as outfile:
+            env = os.environ.copy()
+            env["SOLPSTOP"] = solpstop
             proc = subprocess.Popen([command], stdout=outfile,
                                     stderr=subprocess.STDOUT,
-                                    text=True, timeout=Eirene_time,
-                                    cwd=eirene_path, preexec_fn=os.setsid)
+                                    text=True, cwd=eirene_path,
+                                    preexec_fn=os.setsid)
             try:
                 proc.wait(timeout=Eirene_time)
 
