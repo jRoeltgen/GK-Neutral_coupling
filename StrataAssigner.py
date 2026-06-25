@@ -58,16 +58,18 @@ class StrataAssigner:
 
         self.requested_strata = requested_strata
         self.expected_species_by_particle_class = {
-            k: set(v) for k, v in expected_species_by_particle_class.items()
+            k: self._upper_set(v) for k, v in expected_species_by_particle_class.items()
         }
 
         self.volume_recombination = {"particle":{}, "energy":{}}
         self.volume_recombination["particle"] = {
-            k: (set(v) if isinstance(v, (set, list, tuple)) else {v})
+            self._upper_name(k): (set(v) if isinstance(v,
+                                        (set, list, tuple)) else {v})
             for k, v in vol_rec_mapping["particle"].items()
         }
         self.volume_recombination["energy"] = {
-            k: (set(v) if isinstance(v, (set, list, tuple)) else {v})
+            self._upper_name(k): (set(v) if isinstance(v,
+                                        (set, list, tuple)) else {v})
             for k, v in vol_rec_mapping["energy"].items()
         }
 
@@ -692,6 +694,14 @@ class StrataAssigner:
         if not hasattr(slot, "shape"):
             return np.zeros_like(template) + slot
         return slot
+
+    def _upper_name(self, x):
+        return x.upper() if isinstance(x, str) else x
+
+    def _upper_set(self, v):
+        if isinstance(v, (set, list, tuple)):
+            return {self._upper_name(x) for x in v}
+        return {self._upper_name(v)}
 
     def _assert_structure(self):
         """
