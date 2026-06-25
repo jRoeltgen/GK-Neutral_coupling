@@ -29,7 +29,11 @@ def write_sources_nc(filename, sources, dim_RZ, dim_phi=1,
     """
 
     moments = list(sources.keys())
-    species = list(next(iter(sources.values())).keys())
+    species = sorted({
+        sp
+        for mom_dict in sources.values()
+        for sp in mom_dict.keys()
+    })
 
     # collect temperature keys
     temps = list(dict.fromkeys(
