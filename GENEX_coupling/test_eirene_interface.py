@@ -41,12 +41,16 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
 
     # Geometry dimensions now come from edat
     fake_eirene.plasma_gmtry = {"nx": 10, "ny": 15}
+    fake_eirene.fort31 = {
+        "fnax": np.array([[0.0, 1.0], [0.0, 2.0]]),
+        "fnay": np.array([[1.0, 0.0], [0.0, 2.0]]),
+    }
 
     # Species parsing determines ns
     fake_parser.species = {"bulk_ions": ["D", "T", "He"]}  # ns = 3
 
     # ---- Call ----
-    edat, b2dat = eirene_interface(eirene_path, b2_path)
+    edat, b2dat, pol_mask, rad_mask = eirene_interface(eirene_path, b2_path)
 
     # ---- Assertions ----
     assert edat is fake_eirene
@@ -69,6 +73,13 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
 
     # B2 init
     mock_b2_class.assert_called_once_with(b2_path)
+
+    np.testing.assert_array_equal(
+        pol_mask, np.array([[True, False], [True, False]])
+    )
+    np.testing.assert_array_equal(
+        rad_mask, np.array([[False, True], [True, False]])
+    )
 
 def test_prepare_fort31_3D():
     edat = MagicMock()
@@ -107,6 +118,8 @@ def test_prepare_fort31_3D():
                  "T": np.ones((nx, ny))},
         "es_pot": {"arb.": np.ones((nx, ny))},
         "pr": {"arb.": np.ones((nx, ny))},
+        "fnax": {"D": np.ones((nx, ny)), "T": 2*np.ones((nx, ny))},
+        "fnay": {"D": np.ones((nx, ny)), "T": np.ones((nx, ny))},
         "Q_par": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny)),
                   "T": np.ones((nx, ny))}
     }
@@ -169,6 +182,8 @@ def test_prepare_fort31_2D():
         "Ttot": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny))},
         "es_pot": {"arb.": np.ones((nx, ny))},
         "pr": {"arb.": np.ones((nx, ny))},
+        "fnax": {"D": np.ones((nx, ny))},
+        "fnay": {"D": np.ones((nx, ny))},
         "Q_par": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny))}
     }
 
