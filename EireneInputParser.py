@@ -1,6 +1,8 @@
 import re
+import math
 from pathlib import Path
 from extra_fort_schema import PSEUDO_SPECIES
+import scipy.constants as pyconst
 
 class EireneInputParser:
     """
@@ -31,6 +33,13 @@ class EireneInputParser:
             "test_ions": [],
             "bulk_ions": [],
             "electrons": ["ELECTRONS"]
+        }
+        self.masses = {                    # particle class -> [species]
+            "atoms": [],
+            "molecules": [],
+            "test_ions": [],
+            "bulk_ions": [],
+            "electrons": [pyconst.electron_mass]
         }
 
         # unified mapping: atomic + bulk species -> stratum
@@ -98,6 +107,7 @@ class EireneInputParser:
         n = int(self.lines[i].strip())
         i += 1
         species = []
+        mass = []
         for _ in range(n):
             # advance until we hit a real species-definition line
             while i < len(self.lines) and not self._is_species_line(self.lines[i]):
@@ -123,10 +133,16 @@ class EireneInputParser:
 
             stride = ints[9]   # true 10th integer
             species.append(name)
+            # The mass number immediately follows the species name. Reading
+            # it by token position avoids treating digits in names such as
+            # D2, T2+, or D2T2(B) as numeric fields.
+            name_index = tokens.index(name)
+            mass_number = int(tokens[name_index + 1])
+            mass.append(mass_number * pyconst.proton_mass)
             # jump over irrelevant lines
             i += 1 + 2 * stride
 
-        return species
+        return species, mass
 
     def _is_species_line(self, line: str) -> bool:
         tokens = line.split()
@@ -140,11 +156,18 @@ class EireneInputParser:
         for i, line in enumerate(self.lines):
             for cls, header in self.PARTICLE_HEADERS.items():
                 if line.strip().startswith(header):
-                    sp = self._parse_species_block(i)
+                    sp, mass = self._parse_species_block(i)
                     if cls == "bulk_ions":
                         # remove (B) species
-                        sp = [s for s in sp if "(B)" not in s]
+                        physical = [
+                            (species, species_mass)
+                            for species, species_mass in zip(sp, mass)
+                            if "(B)" not in species
+                        ]
+                        sp = [species for species, _ in physical]
+                        mass = [species_mass for _, species_mass in physical]
                     self.species[cls].extend(sp)
+                    self.masses[cls].extend(mass)
 
     # ---------------------------
     # VOLUME RECOMBINATION
@@ -248,6 +271,40 @@ class EireneInputParser:
             if not sp_list:
                 self.report.warn(f"No species found for particle class '{cls}'")
 
+        # Every physical species must have exactly one finite, positive mass.
+        pseudo_species = set(PSEUDO_SPECIES.values())
+        for cls, sp_list in self.species.items():
+            physical_species = [sp for sp in sp_list if sp not in pseudo_species]
+            mass_list = self.masses.get(cls)
+
+            if mass_list is None:
+                self.report.error(
+                    f"No masses found for particle class '{cls}'"
+                )
+                continue
+
+            if len(mass_list) != len(physical_species):
+                self.report.error(
+                    f"Mass count mismatch for particle class '{cls}': "
+                    f"{len(physical_species)} physical species, "
+                    f"{len(mass_list)} masses"
+                )
+
+            for index, mass in enumerate(mass_list):
+                species = (
+                    physical_species[index]
+                    if index < len(physical_species)
+                    else f"mass index {index}"
+                )
+                if (
+                    not isinstance(mass, (int, float))
+                    or not math.isfinite(mass)
+                    or mass <= 0
+                ):
+                    self.report.error(
+                        f"Invalid mass for '{species}' in particle class "
+                        f"'{cls}': {mass!r}"
+                    )
 
         # volume recombination consistency
         if "SUM" in self.requested_strata:
@@ -281,6 +338,10 @@ class EireneInputParser:
         print("\nSpecies by particle class:")
         for cls, sp in self.species.items():
             print(f"  {cls}: {sp}")
+
+        print("\nMasses by particle class:")
+        for cls, masses in self.masses.items():
+            print(f"  {cls}: {masses}")
 
         print("\nVolume recombination mapping:")
         if self.volume_recombination:
