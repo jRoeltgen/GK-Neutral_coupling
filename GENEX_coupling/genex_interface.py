@@ -110,8 +110,8 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
             raise ValueError("Multiple assumed electrons (charge<0) given")
 
         NO_SPECIES = "N/A"
-        EXPECTED_FIELDS = {"es_pot", "n", "u_par", "E_par", "E_perp",
-            "Q_par", "Q_perp", "Ttot", "u_phi", "u_rad", "q_es", "pr",
+        EXPECTED_FIELDS = {"es_pot", "n", "u_par", "E_par", "E_perp", "pr",
+            "Q_par", "Q_perp", "Ttot", "u_phi", "u_rad", "q_es", "fnax", "fnay"
         }
         VALID_SPECIES = set(spec) | {NO_SPECIES}
         out = defaultdict(dict)
@@ -160,8 +160,22 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                                                 norm=norm, component="radial")
 
         for s in spec:
-            load_field("n", s, norm.n0)
+            n = retry_compute(lambda: load_field("n", s, norm.n0).load())
+            density_tol = 1e-12 * float(np.nanmax(np.abs(n)))
+            zero_mask = (n < density_tol)
+            if not hasattr(load_latest_genex_fields, "ref_mask"):
+                ref_mask = zero_mask.values
+                load_latest_genex_fields.ref_mask = ref_mask
+            else:
+                old_mask = load_latest_genex_fields.ref_mask
+                new_mask = zero_mask.values
+                if not np.array_equal(old_mask, new_mask):
+                    _diagnostic_print(old_mask, new_mask)
+                    raise ValueError("Zero mask changed over time")
+
+            set_field("n", s, n.where(n > 0))
             load_field("u_par", s, norm.c_s0)
+            # Check that these normalization temps are correct
             load_field("E_par", s, norm.Te0 * norm.n0)
             load_field("E_perp", s, norm.Te0 * norm.n0)
             load_field("Q_par", s, norm.Ti0 * norm.n0 * norm.c_s0)
@@ -183,12 +197,14 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                                                 get_field("es_pot", NO_SPECIES),
                                                 get_field("E_par",s),
                                                 get_field("E_perp",s)))
+            set_field("fnay", s, get_field("n", s))
+            set_field("fnax", s, get_field("n", s))
+        print("calc pressure")
         set_field("pr", NO_SPECIES, total_pressure(get_field("n",electrons[0]),
                                         get_field("Ttot", electrons[0]),
                                         get_field("Ttot", ions[0]), norm))
 
         return out, tau_arr[time_index]
-
 
 def calculate_temperatures(params, norm, spec, n, u_par, E_par, E_perp):
     n.attrs["norm"] = norm.n0
@@ -196,7 +212,7 @@ def calculate_temperatures(params, norm, spec, n, u_par, E_par, E_perp):
     E_par.attrs["norm"] = norm.Te0 * norm.n0
     Tpar = parallel_temperature(params, norm, n, E_par, u_par, spec)
     Tperp = perpendicular_temperature(params, norm, n, E_perp)
-    Ttot = Tpar + Tperp
+    Ttot = (Tpar + 2*Tperp)/3
     Ttot.attrs["norm"] = Tpar.attrs["norm"]
     return Ttot, Tpar, Tperp
 
@@ -271,7 +287,8 @@ def wait_until_genex_stable(
             stable_start = None
             time.sleep(check_interval)
             continue
-        if tau.size < 1:
+        if tau.size < 2:
+            time.sleep(check_interval)
             continue
         if last_tau is not None:
             if tau.size != last_tau.size:
@@ -286,3 +303,51 @@ def wait_until_genex_stable(
 
         last_tau = tau
         time.sleep(check_interval)
+
+def retry_compute(fn, attempts=3, delay=0.5):
+    for _ in range(attempts):
+        try:
+            return fn()
+        except RuntimeError as e:
+            if "HDF error" in str(e):
+                time.sleep(delay)
+                continue
+            raise
+    raise RuntimeError("Repeated HDF errors")
+
+def _diagnostic_print(old_mask, new_mask):
+    old_n = int(old_mask.sum())
+    new_n = int(new_mask.sum())
+    print(
+        "Zero count old/new:",
+        old_n, new_n,
+        "delta:", new_n - old_n,
+        flush=True
+    )
+
+    changed = old_mask != new_mask
+    n_changed = int(changed.sum())
+    print("Cells whose zero-status changed:", n_changed, flush=True)
+
+    became_zero = (~old_mask) & new_mask
+    left_zero   = old_mask & (~new_mask)
+
+    print("Newly zero cells:", int(became_zero.sum()), flush=True)
+    print("No longer zero:", int(left_zero.sum()), flush=True)
+
+    # axis 0 = phi, axis 1 = points
+    print("Changed by phi:", flush=True)
+    print(changed.sum(axis=1), flush=True)
+
+    # Number of spatial points that changed in any phi plane
+    rz_changes = changed.sum(axis=0)
+    print(
+        "RZ points changed in any phi:",
+        int((rz_changes > 0).sum()),
+        flush=True
+    )
+
+    # First few changed indices
+    inds = np.argwhere(changed)
+    print("First changed indices [phi, point]:", flush=True)
+    print(inds[:20], flush=True)

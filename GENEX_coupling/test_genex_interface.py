@@ -8,8 +8,6 @@ from types import SimpleNamespace
 from pathlib import Path
 ureg = UnitRegistry()
 
-from collections import defaultdict
-
 from genex_interface import (
     wait_for_genex_init,
     get_grid_with_ghost_filler,
@@ -18,6 +16,7 @@ from genex_interface import (
     toroidal_avg,
     species,
     get_genex_species,
+    retry_compute,
 )
 
 @pytest.fixture
@@ -57,6 +56,14 @@ def fake_species():
         species("e", -1),   # electron
         species("D", +1),   # ion
     ]
+
+@pytest.fixture(autouse=True)
+def clear_load_latest_ref_mask():
+    if hasattr(load_latest_genex_fields, "ref_mask"):
+        delattr(load_latest_genex_fields, "ref_mask")
+    yield
+    if hasattr(load_latest_genex_fields, "ref_mask"):
+        delattr(load_latest_genex_fields, "ref_mask")
 
 @pytest.fixture
 def mocked_io():
@@ -203,7 +210,7 @@ def test_calculate_temperatures(mock_perp, mock_par, fake_norm, fake_data):
         E_perp=fake_data.copy(),
     )
 
-    assert np.allclose(Ttot, Tpar + Tperp)
+    assert np.allclose(Ttot, (Tpar + 2*Tperp)/3)
     assert Ttot.attrs["norm"] == 123
 
     mock_par.assert_called_once()
@@ -319,6 +326,140 @@ def test_load_latest_genex_fields_time_index_too_large(
             time_index=5,
             timeout=1,
         )
+
+def test_load_latest_genex_fields_uses_requested_stable_time_index(
+    fake_grid,
+    fake_norm,
+    fake_data,
+    fake_species,
+):
+    with (
+        patch("genex_interface.load_snaps_genex") as mock_load,
+        patch("genex_interface.electric_field") as mock_efield,
+        patch("genex_interface.velocities_m") as mock_vel,
+        patch("genex_interface.electrostatic_ExB_heat_flux") as mock_q,
+        patch("genex_interface.calculate_temperatures") as mock_calc_temp,
+        patch("genex_interface.total_pressure") as mock_total_pressure,
+        patch("genex_interface.wait_until_genex_stable") as mock_wait,
+    ):
+        tau = np.array([0.0, 0.001, 0.002])
+        mock_wait.return_value = tau
+
+        def fake_loader(path, spec, field):
+            return fake_data.copy().expand_dims(tau=tau)
+
+        mock_load.side_effect = fake_loader
+        mock_efield.return_value = "efield"
+        mock_vel.ExB_velocity.return_value = 1.0
+        mock_vel.diamagnetic_velocity.return_value = 2.0
+        mock_total_pressure.return_value = MagicMock(values=fake_data)
+        mock_vel.parallel_ion_velocity_vector.return_value = xr.DataArray(
+            np.ones((3, 3, 4)),
+            dims=("vector", "RZ", "phi"),
+            coords={
+                "vector": ["eR", "ePhi", "eZ"],
+                "RZ": [0, 1, 2],
+                "phi": [0, 1, 2, 3],
+            },
+        )
+        mock_q.return_value = fake_data
+        mock_calc_temp.return_value = (fake_data, None, None)
+
+        out, time = load_latest_genex_fields(
+            gpath=Path("path"),
+            all_spec=fake_species,
+            grid=fake_grid,
+            equi="equi",
+            params="params",
+            norm=fake_norm,
+            time_index=1,
+            timeout=1,
+        )
+
+        assert time == tau[1]
+        assert set(out["n"]) == {"e", "D"}
+
+@patch("genex_interface._diagnostic_print")
+@patch("genex_interface.wait_until_genex_stable")
+@patch("genex_interface.load_snaps_genex")
+def test_load_latest_genex_fields_zero_mask_change_raises(
+    mock_load,
+    mock_wait,
+    mock_diagnostic,
+    fake_grid,
+    fake_norm,
+    fake_species,
+):
+    tau = np.array([0.0, 1.0])
+    load_latest_genex_fields.ref_mask = np.zeros((3, 4), dtype=bool)
+    mock_wait.return_value = tau
+
+    def fake_loader(path, spec, field):
+        data = xr.DataArray(
+            np.ones((3, 4)),
+            dims=("RZ", "phi"),
+            coords={"RZ": np.arange(3), "phi": np.arange(4)},
+        )
+        if field == "n":
+            data = data.copy()
+            data.values[0, 0] = 0.0
+        return data.expand_dims(tau=tau)
+
+    mock_load.side_effect = fake_loader
+
+    with (
+        patch("genex_interface.electric_field", return_value="efield"),
+        patch("genex_interface.velocities_m") as mock_vel,
+    ):
+        mock_vel.ExB_velocity.return_value = 1.0
+
+        with pytest.raises(ValueError, match="Zero mask changed"):
+            load_latest_genex_fields(
+                gpath=Path("path"),
+                all_spec=fake_species,
+                grid=fake_grid,
+                equi="equi",
+                params="params",
+                norm=fake_norm,
+                time_index=-1,
+                timeout=1,
+            )
+
+    mock_diagnostic.assert_called_once()
+
+def test_retry_compute_returns_immediately_on_success():
+    fn = MagicMock(return_value="done")
+
+    assert retry_compute(fn, attempts=3, delay=0) == "done"
+    fn.assert_called_once_with()
+
+@patch("genex_interface.time.sleep")
+def test_retry_compute_retries_hdf_errors(mock_sleep):
+    fn = MagicMock(side_effect=[RuntimeError("HDF error while reading"), "done"])
+
+    assert retry_compute(fn, attempts=3, delay=0.25) == "done"
+    assert fn.call_count == 2
+    mock_sleep.assert_called_once_with(0.25)
+
+@patch("genex_interface.time.sleep")
+def test_retry_compute_reraises_non_hdf_errors(mock_sleep):
+    fn = MagicMock(side_effect=RuntimeError("different failure"))
+
+    with pytest.raises(RuntimeError, match="different failure"):
+        retry_compute(fn, attempts=3, delay=0.25)
+
+    fn.assert_called_once_with()
+    mock_sleep.assert_not_called()
+
+@patch("genex_interface.time.sleep")
+def test_retry_compute_raises_after_repeated_hdf_errors(mock_sleep):
+    fn = MagicMock(side_effect=RuntimeError("HDF error while reading"))
+
+    with pytest.raises(RuntimeError, match="Repeated HDF errors"):
+        retry_compute(fn, attempts=3, delay=0.25)
+
+    assert fn.call_count == 3
+    assert mock_sleep.call_count == 3
 
 def test_toroidal_avg(fake_data):
 
