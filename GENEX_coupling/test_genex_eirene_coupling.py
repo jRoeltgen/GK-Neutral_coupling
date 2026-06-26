@@ -4,10 +4,13 @@ from types import SimpleNamespace
 from genex_eirene_coupling import (main, status, interpolate_all_moments,
                                    check_species_consistency,
                                    interpolate_all_sources_wrapper,
-                                   normalize_genex_params)
+                                   normalize_genex_params,
+                                   backup_eirene_files,
+                                   next_eirene_index)
 import numpy as np
 import xarray as xr
 from collections import defaultdict
+from pathlib import Path
 
 @pytest.fixture
 def coupling_env(monkeypatch, tmp_path):
@@ -21,10 +24,11 @@ def coupling_env(monkeypatch, tmp_path):
         eirene_time=10,
         MAX_TIMEOUTS=1,
         SumTemp=True,
-        filepattern=str(tmp_path / "out_"),
+        filepattern="out",
         genex_time_index_override=False,
         eirene_path=tmp_path,
         genex_path=tmp_path,
+        eirene_command="eirobjx",
     )
 
     # ----------------------------
@@ -48,11 +52,14 @@ def coupling_env(monkeypatch, tmp_path):
 
     r_all = grid.r_u
     z_all = grid.z_u
-    compute = True
+    compute = np.array([True])
 
     norm = {"R0": 1.0}
 
-    params = {"params_species":{}}
+    params = {
+        "params_species": {},
+        "params_time_loop": {"start_from_checkpoint": False},
+    }
 
     # ----------------------------
     # GENEX mocks
@@ -98,8 +105,18 @@ def coupling_env(monkeypatch, tmp_path):
     # ----------------------------
     edat = MagicMock()
     edat.species_names = {"bulk_ions": ["D"]}
-    edat.sources = {"D": np.array([1.0])}
-    edat.write_ft31 = MagicMock()
+    edat.sources = {
+        "particle": {
+            "D": {"SUM": np.array([1.0]), "stratum_1": np.array([2.0])},
+            "ELECTRONS": {"SUM": np.array([3.0])},
+        }
+    }
+    (tmp_path / "fort.31").write_text("original fort.31")
+
+    def write_ft31(path):
+        Path(path).write_text("updated fort.31")
+
+    edat.write_ft31 = MagicMock(side_effect=write_ft31)
     edat.load_extra_forts = MagicMock()
 
     b2dat = MagicMock()
@@ -108,7 +125,12 @@ def coupling_env(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mod,
         "eirene_interface",
-        MagicMock(return_value=(edat, b2dat)),
+        MagicMock(return_value=(
+            edat,
+            b2dat,
+            np.array([False]),
+            np.array([False]),
+        )),
     )
 
     # ----------------------------
@@ -136,9 +158,11 @@ def test_main_single_iteration_success(coupling_env):
     env["mod"].main(env["args"], deps=env["deps"])
 
     env["deps"].run_eirene.assert_called_once()
+    assert env["deps"].run_eirene.call_args.kwargs["command"] == "eirobjx"
     env["deps"].write_nc.assert_called_once()
     env["deps"].replace.assert_called_once()
     env["deps"].killpg.assert_not_called()
+    assert (env["args"].eirene_path / "eirene_sources_000000" / "fort.31").exists()
 
 def test_main_timeout_kills_and_raises(coupling_env):
     env = coupling_env
@@ -146,6 +170,16 @@ def test_main_timeout_kills_and_raises(coupling_env):
     env["deps"].run_eirene.return_value = env["mod"].status.TIMEOUT
 
     with pytest.raises(RuntimeError):
+        env["mod"].main(env["args"], deps=env["deps"])
+
+    env["deps"].killpg.assert_called_once()
+
+def test_main_eirene_error_kills_and_raises(coupling_env):
+    env = coupling_env
+
+    env["deps"].run_eirene.return_value = env["mod"].status.ERROR
+
+    with pytest.raises(RuntimeError, match="EIRENE failed"):
         env["mod"].main(env["args"], deps=env["deps"])
 
     env["deps"].killpg.assert_called_once()
@@ -181,6 +215,46 @@ def test_main_multiple_iterations(coupling_env):
 
     assert env["deps"].run_eirene.call_count == 3
     assert env["deps"].write_nc.call_count == 3
+    assert (env["args"].eirene_path / "eirene_sources_000002" / "fort.31").exists()
+
+def test_main_retries_transient_hdf_error(coupling_env):
+    env = coupling_env
+
+    env["mod"].genex_interface.load_latest_genex_fields.side_effect = [
+        RuntimeError("HDF error while reading"),
+        (env["fields"], 0.001),
+    ]
+
+    env["mod"].main(env["args"], deps=env["deps"])
+
+    assert env["mod"].genex_interface.load_latest_genex_fields.call_count == 2
+    env["deps"].run_eirene.assert_called_once()
+
+def test_main_repeated_hdf_errors_raise(coupling_env):
+    env = coupling_env
+
+    env["mod"].genex_interface.load_latest_genex_fields.side_effect = [
+        RuntimeError("HDF error while reading"),
+        RuntimeError("HDF error while reading"),
+        RuntimeError("HDF error while reading"),
+    ]
+
+    with pytest.raises(RuntimeError, match="Repeated NetCDF HDF errors"):
+        env["mod"].main(env["args"], deps=env["deps"])
+
+    env["deps"].run_eirene.assert_not_called()
+
+def test_main_checkpoint_uses_next_eirene_index(coupling_env):
+    env = coupling_env
+    env["mod"].genex_interface.wait_for_genex_init.return_value[2][
+        "params_time_loop"
+    ]["start_from_checkpoint"] = True
+    (env["args"].eirene_path / "out_000003.nc").touch()
+
+    env["mod"].main(env["args"], deps=env["deps"])
+
+    assert (env["args"].eirene_path / "eirene_sources_000004" / "fort.31").exists()
+    assert env["deps"].write_nc.call_args.args[0].endswith("out_000004.nc.tmp")
 
 def test_unnormalize_all_mutates():
     import genex_eirene_coupling as mod
@@ -209,6 +283,21 @@ def test_main_sumtemp_false_raises(coupling_env):
     with pytest.raises(NotImplementedError, match="SumTemp=False not implemented"):
         env["mod"].main(env["args"], deps=env["deps"])
 
+def test_main_filters_sources_to_sum_only(coupling_env):
+    env = coupling_env
+
+    env["mod"].main(env["args"], deps=env["deps"])
+
+    source_arg = env["mod"].interpolate_all_sources.call_args.args[1]
+    assert set(source_arg) == {"particle"}
+    assert set(source_arg["particle"]) == {"D", "ELECTRONS"}
+    assert set(source_arg["particle"]["D"]) == {"SUM"}
+    assert set(source_arg["particle"]["ELECTRONS"]) == {"SUM"}
+    np.testing.assert_array_equal(source_arg["particle"]["D"]["SUM"], np.array([1.0]))
+    np.testing.assert_array_equal(
+        source_arg["particle"]["ELECTRONS"]["SUM"], np.array([3.0])
+    )
+
 def test_check_species_consistency_raises():
     eirene_species = ["D"]
     genex_species = [
@@ -226,7 +315,7 @@ def test_interpolate_all_moments_indices(monkeypatch):
 
     def fake_interp(gmtry, tri, arr, ind):
         calls.append(ind)
-        return {"ok": True}
+        return np.arange(4.0)
 
     monkeypatch.setattr("genex_eirene_coupling.interp_moments", fake_interp)
 
@@ -238,18 +327,25 @@ def test_interpolate_all_moments_indices(monkeypatch):
     tri = "tri"
 
     genex_out = {
-        "poloidal_fluxes": {"D": FakeValue(np.ones((3, 3)))},
-        "radial_fluxes": {"D": FakeValue(np.ones((3, 3)))},
+        "fnax": {"D": FakeValue(np.ones((3, 3)))},
+        "fnay": {"D": FakeValue(np.ones((3, 3)))},
         "other": {"D": FakeValue(np.ones((3, 3)))},
     }
 
-    result = interpolate_all_moments(gmtry, tri, genex_out)
+    poloidal_mask = np.array([False, True, False, False])
+    radial_mask = np.array([False, False, True, False])
+
+    result = interpolate_all_moments(
+        gmtry, tri, genex_out, radial_mask, poloidal_mask
+    )
 
     assert calls[0] == [0, 2]
     assert calls[1] == [2, 3]
     assert calls[2] == [0, 1, 2, 3]
 
-    assert result["poloidal_fluxes"]["D"] == {"ok": True}
+    np.testing.assert_array_equal(result["fnax"]["D"], np.array([0.0, 0.0, 2.0, 3.0]))
+    np.testing.assert_array_equal(result["fnay"]["D"], np.array([0.0, 1.0, 0.0, 3.0]))
+    np.testing.assert_array_equal(result["other"]["D"], np.arange(4.0))
 
 
 def test_main_tau_must_increase(coupling_env):
@@ -320,6 +416,49 @@ def test_normalize_genex_params_modifies_in_place():
 
     assert result is params
     assert params["params_species"]["names"] == ["a", "b"]
+
+def test_backup_eirene_files_copies_fort31_and_moves_matching_files(tmp_path):
+    (tmp_path / "fort.31").write_text("fort31")
+    (tmp_path / "fort.44").write_text("fort44")
+    (tmp_path / "fort.12").write_text("fort12")
+    (tmp_path / "fort.123").write_text("fort123")
+    (tmp_path / "fort.9").write_text("keep")
+    (tmp_path / "notes.txt").write_text("keep")
+
+    backup_eirene_files(tmp_path, 7)
+
+    dest = tmp_path / "eirene_sources_000007"
+    assert dest.is_dir()
+    assert (dest / "fort.31").read_text() == "fort31"
+    assert (dest / "fort.44").read_text() == "fort44"
+    assert (dest / "fort.12").read_text() == "fort12"
+    assert (dest / "fort.123").read_text() == "fort123"
+    assert (tmp_path / "fort.31").exists()
+    assert not (tmp_path / "fort.44").exists()
+    assert not (tmp_path / "fort.12").exists()
+    assert not (tmp_path / "fort.123").exists()
+    assert (tmp_path / "fort.9").exists()
+    assert (tmp_path / "notes.txt").exists()
+
+def test_backup_eirene_files_ignores_matching_directories(tmp_path):
+    (tmp_path / "fort.31").write_text("fort31")
+    (tmp_path / "fort.123").mkdir()
+
+    backup_eirene_files(tmp_path, 0)
+
+    assert (tmp_path / "fort.123").is_dir()
+    assert not (tmp_path / "eirene_sources_000000" / "fort.123").exists()
+
+def test_next_eirene_index_returns_next_after_highest_match(tmp_path):
+    (tmp_path / "input_sources_000001.nc").touch()
+    (tmp_path / "input_sources_000007.nc").touch()
+    (tmp_path / "input_sources_bad.nc").touch()
+    (tmp_path / "other_000009.nc").touch()
+
+    assert next_eirene_index(tmp_path, "input_sources") == 8
+
+def test_next_eirene_index_returns_zero_without_matches(tmp_path):
+    assert next_eirene_index(tmp_path, "input_sources") == 0
 
 
 # ----------------------------------------------------------------------

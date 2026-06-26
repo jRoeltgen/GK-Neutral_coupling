@@ -14,13 +14,17 @@ from time import sleep
 from types import SimpleNamespace
 import numpy as np
 import dask
-import numbers
-import pdb
+import shutil
+import argparse
+import re
+import faulthandler
 
 default_eirene_path = Path("/pscratch/sd/j/jonroelt/tcv_genex_coupling/coupled_run/")
 default_genex_path = Path("/pscratch/sd/j/jonroelt/source_testing/3D_source/branch_all_source_file_params/")
+default_stop = Path("/global/cfs/cdirs/m2116/solps-iter")
 
 def main(args, deps=None):
+    faulthandler.enable(all_threads=True)
     if deps is None:
         deps = SimpleNamespace(
             run_eirene=run_eirene,
@@ -30,24 +34,23 @@ def main(args, deps=None):
             replace=replace,
             pid_exists=psutil.pid_exists,
         )
-    print("Entered main ...", flush=True)
+    dask.config.set(scheduler="synchronous")
     eirene_path = Path(args.eirene_path)
     genex_path = Path(args.genex_path)
-    edat, b2dat = eirene_interface(eirene_path, eirene_path)
-    print("Next genex init...", flush=True)
+    edat, b2dat, pol_mask, rad_mask = eirene_interface(eirene_path, eirene_path)
     grid, equi, params, norm, r_all, z_all, compute = genex_interface.wait_for_genex_init(genex_path)
-    print("Normalize params", flush=True)
     params = normalize_genex_params(params)
-    print("Getting genex species...", flush=True)
     genex_species = genex_interface.get_genex_species(params)
-    print("Getting genex electron name", flush=True)
     genex_electrons = get_genex_electron_name(genex_species)
     check_species_consistency(edat.species_names["bulk_ions"], genex_species)
     grid_r = np.asarray(r_all*norm["R0"])
-    grid_z = -np.asarray(z_all*norm["R0"])
-    index = 0
+    # Need to change this negative to function of grid._flipped_z and equi._flipped_Z
+    grid_z = np.asarray(z_all*norm["R0"])
+    if params["params_time_loop"]["start_from_checkpoint"]:
+        index = next_eirene_index(eirene_path, args.filepattern)
+    else:
+        index = 0
     MAX_TIMEOUTS = args.MAX_TIMEOUTS
-    print("args.genex_time_index_override is ",args.genex_time_index_override)
     if args.genex_time_index_override:
         time_index = 0
         ntau = 40
@@ -55,36 +58,45 @@ def main(args, deps=None):
         time_index = -1
     last_tau = -1
     # Precompute triangulation
-    print("Build triangulation...", flush=True)
     tri = build_triangulation(grid_r[compute], grid_z[compute])
-    print("Start main loop...", flush=True)
     timeout = 600
     while deps.pid_exists(args.pid):
-        genex_fields, tau = genex_interface.load_latest_genex_fields(genex_path,
-                genex_species, grid, equi, params, norm, time_index, timeout)
+        #gc.collect()
+
+        for attempt in range(3):
+            try:
+                genex_fields, tau = genex_interface.load_latest_genex_fields(
+                    genex_path, genex_species, grid, equi, params, norm,
+                    time_index, timeout)
+                break
+            except RuntimeError as e:
+                if "HDF error" in str(e):
+                    print(f"Transient HDF error, retry {attempt+1}")
+                    continue
+                raise
+        else:
+            raise RuntimeError("Repeated NetCDF HDF errors.")
+
         timeout = 300
-        print("tau=",tau,flush=True)
         if (tau <= last_tau):
             deps.sleep(5)
             continue
         unnormalize_all(genex_fields)
-        print("Toroidal avg")
         genex_fields_2D = genex_interface.toroidal_avg(genex_fields)
-        print("Interpolate all moments:")
         interpolated = interpolate_all_moments(b2dat.gmtry, tri,
-                                               genex_fields_2D)
+                                               genex_fields_2D, pol_mask,
+                                               rad_mask)
         del genex_fields_2D, genex_fields
-        print("prepare fort 31")
         prepare_fort31(edat, interpolated, genex_electrons,
                      edat.species_names["bulk_ions"])
-        print("write fort 31")
         edat.write_ft31(eirene_path / Path("fort.31"))
 
         print(f"[{index}] Running EIRENE", flush=True)
         num_timeouts = 0
         eirene_time = args.eirene_time
         while num_timeouts<MAX_TIMEOUTS:
-            eirene_status = deps.run_eirene(eirene_time, eirene_path=eirene_path)
+            eirene_status = deps.run_eirene(eirene_time, eirene_path=eirene_path,
+                                            command=args.eirene_command)
             if eirene_status == status.SUCCESS:
                 break
             elif eirene_status == status.TIMEOUT:
@@ -105,7 +117,14 @@ def main(args, deps=None):
                               convert_units=True)
 
         if args.SumTemp:
-            sources = edat.sources
+            sources = {
+                mom: {
+                    species: {"SUM": strata["SUM"]}
+                    for species, strata in species_dict.items()
+                    if "SUM" in strata
+                }
+                for mom, species_dict in edat.sources.items()
+            }
         else:
             raise NotImplementedError("SumTemp=False not implemented")
 
@@ -115,11 +134,12 @@ def main(args, deps=None):
             genex_electrons=genex_electrons,
         )
 
-        filename = args.filepattern + f"{index:06d}" + ".nc"
+        filename = args.filepattern + f"_{index:06d}" + ".nc"
         filename_tmp = filename + ".tmp"
         print(f"[{index}] Writing {filename_tmp}", flush=True)
         deps.write_nc(filename_tmp, interp_sources, grid_r.size)
         deps.replace(filename_tmp, filename)
+        backup_eirene_files(eirene_path, index)
         index += 1
         last_tau = tau
         if args.genex_time_index_override:
@@ -144,7 +164,7 @@ def unnormalize_all(genex_out):
         for species, value in field_block.items():
             genex_out[field][species] = genex_interface.unnormalize(value)
 
-def interpolate_all_moments(gmtry, tri, genex_out):
+def interpolate_all_moments(gmtry, tri, genex_out, radial_mask, poloidal_mask):
     out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     flattened = []
     keys = []
@@ -154,15 +174,23 @@ def interpolate_all_moments(gmtry, tri, genex_out):
             flattened.append(value.data)   # keep as dask array
             keys.append((field, species))
 
+    for k, arr in zip(keys, flattened):
+        if dask.is_dask_collection(arr):
+            _ = arr.compute()
     computed = dask.compute(*flattened)
+
     for (field, species), arr in zip(keys, computed):
-        if field == "poloidal_fluxes": # Not currently used
+        if field.endswith("ax"):
             ind = [0,2]
-        elif field == "radial_fluxes": # Not currently used
+            mask = poloidal_mask
+        elif field.endswith("ay"):
             ind = [2,3]
+            mask = radial_mask
         else:
             ind = [0,1,2,3]
+            mask = np.zeros_like(poloidal_mask, dtype=bool)
         out[field][species] = interp_moments(gmtry, tri, arr, ind)
+        out[field][species][mask] = 0
     return out
 
 def normalize_genex_params(params):
@@ -226,6 +254,53 @@ def interpolate_all_sources_wrapper(
 
     return out
 
+def backup_eirene_files(eirene_path, index):
+    # Create directory name like eirene_sources_000000
+    dest_dir = eirene_path / Path(f"eirene_sources_{index:06d}")
+    dest_dir.mkdir(exist_ok=True)
+
+    # Match:
+    #   fort.???  -> exactly 3 chars after "fort."
+    #   fort.4?   -> 2 chars starting with 4
+    #   fort.1?   -> 2 chars starting with 1
+    patterns = [
+        "fort.???",
+        "fort.4?",
+        "fort.1?",
+    ]
+
+    shutil.copy(Path(eirene_path) / Path("fort.31"), dest_dir)
+    for pattern in patterns:
+        for file_path in Path(eirene_path).glob(pattern):
+            if file_path.is_file():
+                shutil.move(str(file_path), dest_dir / file_path.name)
+
+def next_eirene_index(eirene_path, filepattern):
+    """
+    Scan files of the form:
+        eirene_path / f"{filepattern}_{index:06d}.nc"
+
+    Returns:
+        max_index + 1 (or 0 if no matching files exist)
+    """
+
+    eirene_path = Path(eirene_path)
+
+    # match: filepattern_000123.nc
+    regex = re.compile(rf"^{re.escape(filepattern)}_(\d{{6}})\.nc$")
+
+    max_index = -1
+
+    for f in eirene_path.glob(f"{filepattern}_*.nc"):
+        m = regex.match(f.name)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        if idx > max_index:
+            max_index = idx
+
+    return max_index + 1
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="genex_eirene_coupling", description="Couple Gene-X and Eirene throught I/O and interpolate onto the other's grid")
     parser.add_argument("--pid", type=int, help="Gene-X Process ID")
@@ -246,6 +321,8 @@ if __name__ == "__main__":
                         "simulation is killed")
     parser.add_argument("--eirene_time", type=int, default=200,
                         help="Number of seconds to allow Eirene to run.")
+    parser.add_argument("--solpstop", type=str, default=default_stop,
+                        help="To be written. For reaction paths.")
     parser.add_argument("--genex_time_index_override", type=bool, default=False,
                         help="Internal/testing only. Overrides GENE-X time selection. "
                             "Default (False) selects latest time slice. "
