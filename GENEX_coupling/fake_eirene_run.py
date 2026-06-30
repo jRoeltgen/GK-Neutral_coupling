@@ -2,6 +2,10 @@ import numpy as np
 from pathlib import Path
 from write_netcdf import write_sources_nc
 from genex_eirene_coupling import main
+from temperature_mapping_utils import (
+    default_single_species_pseudo_temperature_handler,
+    default_sparse_temperature_handler,
+)
 from CheckedRunEirene import CheckedRunEirene
 import os, signal, psutil
 import time
@@ -49,6 +53,11 @@ def test_full_coupling(tmp_path, override, fake=-1):
             sleep=lambda x: time.sleep(0.1),
             replace=os.replace,
             pid_exists=psutil.pid_exists,
+            collision_mappers=None,
+            sparse_temperature_handler=default_sparse_temperature_handler,
+            pseudo_temperature_handler=(
+                default_single_species_pseudo_temperature_handler
+            ),
         )
 
         #if fake:

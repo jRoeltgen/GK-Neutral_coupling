@@ -2,10 +2,101 @@ import numpy as np
 import pytest
 
 from temperature_mapping_utils import (
+    default_single_species_pseudo_temperature_handler,
+    default_sparse_temperature_handler,
+    resolve_temperature_label,
     split_ionization_cx,
     linear_temperature_mapper,
     atom_plasma_cx_mapper,
 )
+
+
+def test_default_sparse_temperature_handler_fills_at_threshold():
+    points = np.array([[0.0, 0.0], [1.0, 0.0]])
+    result = default_sparse_temperature_handler(
+        np.array([5.0, np.nan]),
+        np.array([1.0, 0.0]),
+        points,
+        threshold=0.5,
+    )
+
+    np.testing.assert_array_equal(result, np.array([5.0, 5.0]))
+
+
+@pytest.mark.parametrize(
+    ("density", "threshold"),
+    [
+        (np.array([0.0, 0.0]), 0.5),
+        (np.array([1.0, 0.0, 0.0]), 0.5),
+    ],
+)
+def test_default_sparse_temperature_handler_omits_too_sparse_data(
+    density, threshold
+):
+    points = np.column_stack([np.arange(density.size), np.zeros(density.size)])
+    temperature = np.where(density > 0, 5.0, np.nan)
+
+    assert default_sparse_temperature_handler(
+        temperature, density, points, threshold=threshold
+    ) is None
+
+
+def test_default_sparse_temperature_handler_validates_inputs():
+    points = np.array([[0.0, 0.0], [1.0, 0.0]])
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        default_sparse_temperature_handler(
+            np.ones(2), np.ones(2), points, threshold=1.1
+        )
+    with pytest.raises(ValueError, match="same shape"):
+        default_sparse_temperature_handler(
+            np.ones(1), np.ones(2), points, threshold=0.5
+        )
+    with pytest.raises(ValueError, match="triangle_points"):
+        default_sparse_temperature_handler(
+            np.ones(2), np.ones(2), np.ones((2, 3)), threshold=0.5
+        )
+
+
+@pytest.mark.parametrize(
+    ("base_label", "species", "temperatures", "expected"),
+    [
+        ("Ti", "D+", {"Ti_D+": 1, "Ti": 2}, "Ti_D+"),
+        ("Tn", "D+", {"Tn_D": 1, "Tn_D+": 2, "Tn": 3}, "Tn_D"),
+        ("Tm", "D2", {"Tm": 1}, "Tm"),
+        ("Tti", "D2+", {}, None),
+    ],
+)
+def test_resolve_temperature_label(
+    base_label, species, temperatures, expected
+):
+    assert (
+        resolve_temperature_label(base_label, species, temperatures)
+        == expected
+    )
+
+
+def test_default_pseudo_temperature_handler_is_single_species_only():
+    temperature = np.array([1.0, 2.0])
+    density = np.array([[3.0], [4.0]])
+
+    pseudo_temperature, pseudo_density = (
+        default_single_species_pseudo_temperature_handler(
+            [temperature],
+            density,
+            particle_class="atoms",
+            species_labels=["D"],
+        )
+    )
+    np.testing.assert_array_equal(pseudo_temperature, temperature)
+    np.testing.assert_array_equal(pseudo_density, density[:, 0])
+
+    with pytest.raises(ValueError, match="only valid for one species"):
+        default_single_species_pseudo_temperature_handler(
+            [temperature, temperature],
+            np.column_stack([density, density]),
+            particle_class="atoms",
+            species_labels=["D", "T"],
+        )
 
 # ============================================================
 # Fixtures

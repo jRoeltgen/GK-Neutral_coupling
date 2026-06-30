@@ -1,13 +1,11 @@
 from collections import defaultdict
 from temperature_mapping_utils import default_D_only_collision_mappers
 import numpy as np
-import temperature_mapping_utils
-print(temperature_mapping_utils.__file__)
 
 class SourcePostProcessor:
 
     def __init__(self, sources, temperature_values,
-                 collision_mappers=default_D_only_collision_mappers):
+                 collision_mappers=None):
         """
         Converts:
             sources[moment][collision][species][stratum]
@@ -16,11 +14,22 @@ class SourcePostProcessor:
 
         temperature_values:
             dict: temperature label -> value
-            e.g. {"Ti": 100, "Te": 30}
+            e.g. {"Tn_D": array, "Ti_D+": array}
+
+        collision_mappers:
+            None selects the built-in D-only mapping. Any explicitly supplied
+            mapping is trusted as the caller's intended decomposition.
         """
         self.sources = sources
         self.temperature_values = temperature_values
-        self.collision_mappers = collision_mappers
+        self.using_default_collision_mappers = collision_mappers is None
+        self.collision_mappers = (
+            default_D_only_collision_mappers
+            if collision_mappers is None
+            else collision_mappers
+        )
+        if self.using_default_collision_mappers:
+            self._validate_default_mapper_configuration()
 
         self.sources_by_species = None
         self.sources_by_temperature = None
@@ -52,7 +61,7 @@ class SourcePostProcessor:
             self.transpose_sources()
 
         sources_T = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
-        temperature = defaultdict(dict)
+        temperature = {}
 
         # Context for mappers (extendable)
         context = self._get_context()
@@ -92,6 +101,11 @@ class SourcePostProcessor:
 
                     # ---- Aggregate into temperature bins ----
                     for T_label, arr in values.items():
+                        if (
+                            T_label is not None
+                            and T_label not in self.temperature_values
+                        ):
+                            T_label = None
                         if sources_T[mom][species][T_label] is None:
                             sources_T[mom][species][T_label] = arr.copy()
                         else:
@@ -102,12 +116,32 @@ class SourcePostProcessor:
                                 )
                             sources_T[mom][species][T_label] += arr
 
-                        temperature[species][T_label] = self.temperature_values[T_label]
+                        if T_label is not None:
+                            temperature[T_label] = self.temperature_values[T_label]
 
         self.sources_by_temperature = sources_T
         self.temperature = temperature
 
         return sources_T, temperature
+
+    def _validate_default_mapper_configuration(self):
+        physical_atoms = {
+            label.removeprefix("Tn_")
+            for label in self.temperature_values
+            if label.startswith("Tn_")
+            and label != "Tn_ATOMS"
+        }
+        ion_species = {
+            label.removeprefix("Ti_")
+            for label in self.temperature_values
+            if label.startswith("Ti_")
+        }
+        if len(physical_atoms) > 1 or len(ion_species) > 1:
+            raise ValueError(
+                "The built-in CX mapper supports only one atom/ion pair. "
+                "Provide collision_mappers explicitly for multi-species "
+                "temperature decomposition."
+            )
 
     def _get_context(self):
         context = {

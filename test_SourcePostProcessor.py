@@ -176,3 +176,56 @@ def test_linear_conservation_violation(broken_linear_mapper):
 
     with pytest.raises(AssertionError):
         proc.regroup_by_temperature()
+
+
+def test_composite_temperature_labels_are_used_for_d_plus():
+    Sp = np.array([1.0])
+    Tn = np.array([3.0])
+    Ti = np.array([1.0])
+    St = 1.5 * Sp * Tn
+    sources = {
+        "particle": {"atom-plasma": {"D+": {"SUM": Sp}}},
+        "energy": {"atom-plasma": {"D+": {"SUM": St}}},
+    }
+
+    proc = SourcePostProcessor(
+        sources,
+        {"Tn_D": Tn, "Ti_D+": Ti},
+    )
+    sources_T, used_temperatures = proc.regroup_by_temperature()
+
+    assert set(sources_T["energy"]["D+"]) == {"Tn_D", "Ti_D+"}
+    assert set(used_temperatures) == {"Tn_D", "Ti_D+"}
+
+
+def test_missing_temperature_uses_implicit_channel():
+    sources = {
+        "particle": {
+            "molecule-plasma": {
+                "D2+": {"SUM": np.array([2.0])}
+            }
+        }
+    }
+
+    proc = SourcePostProcessor(sources, {})
+    sources_T, used_temperatures = proc.regroup_by_temperature()
+
+    np.testing.assert_array_equal(
+        sources_T["particle"]["D2+"][None], np.array([2.0])
+    )
+    assert used_temperatures == {}
+
+
+def test_default_mapper_rejects_multi_species_but_explicit_mapper_is_trusted():
+    temperatures = {
+        "Tn_D": np.array([1.0]),
+        "Tn_T": np.array([1.0]),
+        "Ti_D+": np.array([1.0]),
+        "Ti_T+": np.array([1.0]),
+    }
+
+    with pytest.raises(ValueError, match="built-in CX mapper"):
+        SourcePostProcessor({}, temperatures)
+
+    custom = {"atom-plasma": lambda **kwargs: {"values": {None: np.array([1.0])}}}
+    SourcePostProcessor({}, temperatures, collision_mappers=custom)

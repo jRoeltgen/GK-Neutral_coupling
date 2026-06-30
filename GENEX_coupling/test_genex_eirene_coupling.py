@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from genex_eirene_coupling import (main, status, interpolate_all_moments,
                                    check_species_consistency,
                                    interpolate_all_sources_wrapper,
+                                   interpolate_temperature_values,
                                    normalize_genex_params,
                                    backup_eirene_files,
                                    next_eirene_index)
@@ -41,6 +42,11 @@ def coupling_env(monkeypatch, tmp_path):
         sleep=MagicMock(),
         replace=MagicMock(),
         pid_exists=MagicMock(side_effect=[True, False]),
+        collision_mappers=None,
+        sparse_temperature_handler=mod.default_sparse_temperature_handler,
+        pseudo_temperature_handler=(
+            mod.default_single_species_pseudo_temperature_handler
+        ),
     )
 
     # ----------------------------
@@ -274,14 +280,61 @@ def test_get_genex_electron_name_none():
 
     assert get_genex_electron_name(species) is None
 
-def test_main_sumtemp_false_raises(coupling_env):
+def test_main_sumtemp_false_writes_temperatures(coupling_env, monkeypatch):
     env = coupling_env
-
-    # Override only what matters
     env["args"].SumTemp = False
+    env["mod"].genex_interface.toroidal_avg.return_value = {
+        "Ttot": {"D": np.array([4.0])}
+    }
+    env["edat"].full_source_in_SI = {}
+    monkeypatch.setattr(
+        env["mod"],
+        "get_temperatures",
+        MagicMock(return_value={"Ti_D": np.array([1.0])}),
+    )
+    fake_processor = MagicMock()
+    fake_processor.regroup_by_temperature.return_value = (
+        {},
+        {"Ti_D": np.array([1.0])},
+    )
+    monkeypatch.setattr(
+        env["mod"].SPP,
+        "SourcePostProcessor",
+        MagicMock(return_value=fake_processor),
+    )
 
-    with pytest.raises(NotImplementedError, match="SumTemp=False not implemented"):
-        env["mod"].main(env["args"], deps=env["deps"])
+    custom_mappers = {"atom-plasma": MagicMock()}
+    custom_sparse_handler = MagicMock()
+    custom_pseudo_handler = MagicMock()
+    env["deps"].collision_mappers = custom_mappers
+    env["deps"].sparse_temperature_handler = custom_sparse_handler
+    env["deps"].pseudo_temperature_handler = custom_pseudo_handler
+    env["mod"].main(env["args"], deps=env["deps"])
+
+    kwargs = env["deps"].write_nc.call_args.kwargs
+    assert kwargs["write_temperature"] is True
+    np.testing.assert_allclose(
+        kwargs["temperature_values"]["Ti_D"],
+        np.array([[4.0 * 1.602176634e-19]]),
+    )
+    assert (
+        env["mod"].SPP.SourcePostProcessor.call_args.kwargs[
+            "collision_mappers"
+        ]
+        is custom_mappers
+    )
+    assert (
+        env["mod"].get_temperatures.call_args.kwargs[
+            "sparse_temperature_handler"
+        ]
+        is custom_sparse_handler
+    )
+    assert (
+        env["mod"].get_temperatures.call_args.kwargs[
+            "pseudo_temperature_handler"
+        ]
+        is custom_pseudo_handler
+    )
 
 def test_main_filters_sources_to_sum_only(coupling_env):
     env = coupling_env
@@ -557,3 +610,27 @@ def test_interpolate_wrapper_preserves_dtype(monkeypatch):
     )
 
     assert out["mom"]["IONS"]["src"].dtype == np.int32
+
+
+def test_temperature_interpolation_reuses_direct_values(monkeypatch):
+    compute = np.array([True, False, True])
+    interpolate = MagicMock(return_value=np.array([10.0, 20.0]))
+    monkeypatch.setattr(
+        "genex_eirene_coupling.interpolate_source", interpolate
+    )
+
+    out = interpolate_temperature_values(
+        tria="mesh",
+        temperature_values={
+            "Tn_D": np.array([1.0, 2.0]),
+            "Ti_D": np.array([3.0, 4.0]),
+        },
+        grid_r=np.array([0.0, 1.0, 2.0]),
+        grid_z=np.array([0.0, 1.0, 2.0]),
+        compute=compute,
+        direct_values={"Ti_D": np.array([30.0, 40.0])},
+    )
+
+    np.testing.assert_array_equal(out["Tn_D"], [[10.0, 0.0, 20.0]])
+    np.testing.assert_array_equal(out["Ti_D"], [[30.0, 0.0, 40.0]])
+    interpolate.assert_called_once()

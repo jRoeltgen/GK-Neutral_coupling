@@ -3,8 +3,15 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import subprocess
 
-from eirene_interface import (eirene_interface, prepare_fort31, dict_to_array,
-                              run_eirene, status)
+from eirene_interface import (
+    eirene_interface,
+    get_temperatures,
+    map_ion_temperatures_to_triangles,
+    prepare_fort31,
+    dict_to_array,
+    run_eirene,
+    status,
+)
 
 @pytest.fixture
 def fake_eirene_path(tmp_path):
@@ -79,6 +86,169 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
     np.testing.assert_array_equal(
         rad_mask, np.array([[False, True], [True, False]])
     )
+
+
+def test_map_ion_temperatures_directly_to_triangles():
+    from scipy.spatial import Delaunay
+
+    points = np.array([
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
+    ])
+    edat = MagicMock()
+    edat.triangle_mesh.incenter = np.array([
+        [0.25, 0.25],
+        [2.0, 2.0],
+    ])
+
+    result = map_ion_temperatures_to_triangles(
+        edat,
+        {"D+": points[:, 0] + points[:, 1]},
+        Delaunay(points),
+        scale=1.0,
+    )
+
+    np.testing.assert_allclose(result["Ti_D+"], np.array([0.5, 0.0]))
+
+
+@pytest.fixture
+def complete_temperature_edat():
+    edat = MagicMock()
+    edat.triangle_mesh.incenter = np.array([[0.0, 0.0], [1.0, 0.0]])
+    edat.masses = {
+        "atoms": [2.0],
+        "molecules": [4.0],
+        "test_ions": [6.0],
+    }
+    edat.fort46 = {
+        "atom labels": ["D\n"],
+        "molecule labels": ["D2\n"],
+        "ion labels": ["D2+\n"],
+        "pdena": np.array([[1.0], [2.0]]),
+        "pdenm": np.array([[1.0], [2.0]]),
+        "pdeni": np.array([[1.0], [2.0]]),
+        "edena": np.array([[10.0], [20.0]]),
+        "edenm": np.array([[30.0], [40.0]]),
+        "edeni": np.array([[50.0], [60.0]]),
+        "vxdena": np.array([[2.0], [3.0]]),
+        "vxdenm": np.array([[2.0], [3.0]]),
+        "vxdeni": np.array([[2.0], [3.0]]),
+        "vydena": np.zeros((2, 1)),
+        "vzdena": np.zeros((2, 1)),
+        "vydenm": np.zeros((2, 1)),
+        "vzdenm": np.zeros((2, 1)),
+        "vydeni": np.zeros((2, 1)),
+        "vzdeni": np.zeros((2, 1)),
+    }
+    return edat
+
+
+def test_get_temperatures_applies_handlers_to_every_species_class(
+    tmp_path, complete_temperature_edat
+):
+    sparse_calls = []
+    pseudo_calls = []
+
+    def sparse_handler(temperature, density, points, *, threshold):
+        sparse_calls.append(
+            (temperature.copy(), density.copy(), points.copy(), threshold)
+        )
+        return temperature + 10.0
+
+    def pseudo_handler(
+        raw_temperatures,
+        density_block,
+        *,
+        particle_class,
+        species_labels,
+    ):
+        pseudo_calls.append(
+            (
+                [value.copy() for value in raw_temperatures],
+                density_block.copy(),
+                particle_class,
+                species_labels,
+            )
+        )
+        return raw_temperatures[0] + 100.0, density_block[:, 0]
+
+    result = get_temperatures(
+        complete_temperature_edat,
+        tmp_path,
+        sparse_temperature_handler=sparse_handler,
+        pseudo_temperature_handler=pseudo_handler,
+        sparse_threshold=0.25,
+    )
+
+    physical_labels = {"Tn_D", "Tm_D2", "Tti_D2+"}
+    pseudo_labels = {"Tn_ATOMS", "Tm_MOLECULES", "Tti_TEST IONS"}
+    assert set(result) == physical_labels | pseudo_labels
+    assert len(sparse_calls) == 6
+    assert len(pseudo_calls) == 3
+    assert {call[2] for call in pseudo_calls} == {
+        "atoms", "molecules", "test_ions"
+    }
+    assert all(call[3] == 0.25 for call in sparse_calls)
+    assert all(
+        np.array_equal(call[2], complete_temperature_edat.triangle_mesh.incenter)
+        for call in sparse_calls
+    )
+
+    expected_physical = {
+        "Tn_D": np.array([22.0, 27.5]),
+        "Tm_D2": np.array([46.0, 46.5]),
+        "Tti_D2+": np.array([70.0, 65.5]),
+    }
+    for label, expected in expected_physical.items():
+        np.testing.assert_allclose(result[label], expected)
+
+    for physical, pseudo in zip(
+        ("Tn_D", "Tm_D2", "Tti_D2+"),
+        ("Tn_ATOMS", "Tm_MOLECULES", "Tti_TEST IONS"),
+    ):
+        np.testing.assert_allclose(result[pseudo], result[physical] + 100.0)
+
+
+@pytest.mark.parametrize("include_ions", [False, True])
+def test_get_temperatures_adds_ions_only_when_values_are_given(
+    tmp_path, complete_temperature_edat, monkeypatch, include_ions
+):
+    mapped = {"Ti_D+": np.array([70.0, 80.0])}
+    mapper = MagicMock(return_value=mapped)
+    monkeypatch.setattr(
+        "eirene_interface.map_ion_temperatures_to_triangles", mapper
+    )
+    ion_values = {"D+": np.array([7.0, 8.0])} if include_ions else None
+    triangulation = object() if include_ions else None
+
+    result = get_temperatures(
+        complete_temperature_edat,
+        tmp_path,
+        ion_temperature_values=ion_values,
+        genex_triangulation=triangulation,
+    )
+
+    if include_ions:
+        np.testing.assert_array_equal(result["Ti_D+"], mapped["Ti_D+"])
+        mapper.assert_called_once_with(
+            complete_temperature_edat, ion_values, triangulation
+        )
+    else:
+        assert not any(label.startswith("Ti_") for label in result)
+        mapper.assert_not_called()
+
+
+def test_get_temperatures_requires_triangulation_with_ion_values(
+    tmp_path, complete_temperature_edat
+):
+    with pytest.raises(ValueError, match="genex_triangulation"):
+        get_temperatures(
+            complete_temperature_edat,
+            tmp_path,
+            ion_temperature_values={"D+": np.array([7.0, 8.0])},
+        )
 
 def test_prepare_fort31_3D():
     edat = MagicMock()

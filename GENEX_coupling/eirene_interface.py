@@ -4,6 +4,11 @@ import triangle_mesh
 from EireneInputParser import EireneInputParser
 from pathlib import Path
 import scipy.constants as pyconst
+from scipy.interpolate import LinearNDInterpolator
+from temperature_mapping_utils import (
+    default_single_species_pseudo_temperature_handler,
+    default_sparse_temperature_handler,
+)
 import subprocess
 import numpy as np
 import os
@@ -30,6 +35,7 @@ def eirene_interface(eirene_path, b2_path):
     eip = EireneInputParser(eirene_path / Path("input.dat"))
     eip.parse_species()
     edat.species_names = eip.species
+    edat.masses = eip.masses
     ns = len(edat.species_names["bulk_ions"])
 
     edat.read_ft30(eirene_path / Path("fort.30"))
@@ -48,6 +54,127 @@ def eirene_interface(eirene_path, b2_path):
     edat.triangle_mesh.calc_incenter()
 
     return edat, b2dat, pol_mask, rad_mask
+
+TEMPERATURE_CLASS_INFO = {
+    "a": ("atoms", "atom labels", "Tn", "ATOMS"),
+    "m": ("molecules", "molecule labels", "Tm", "MOLECULES"),
+    "i": ("test_ions", "ion labels", "Tti", "TEST IONS"),
+}
+
+
+def _temperature_from_moments(energy_density, density, momentum_squared, mass):
+    """Apply the existing provisional EIRENE temperature expression."""
+    internal_energy = (
+        energy_density
+        - np.sqrt(momentum_squared)
+        + 0.5 * mass * momentum_squared * density
+    )
+    return np.divide(
+        internal_energy,
+        density,
+        out=np.full_like(energy_density, np.nan, dtype=float),
+        where=density > 0,
+    )
+
+
+def map_ion_temperatures_to_triangles(
+    edat,
+    ion_temperature_values,
+    genex_triangulation,
+    *,
+    scale=pyconst.elementary_charge,
+):
+    """Map GENE-X ion temperatures directly onto EIRENE triangles."""
+    mapped = {}
+    for species, temperature in ion_temperature_values.items():
+        interpolator = LinearNDInterpolator(
+            genex_triangulation,
+            np.asarray(temperature).reshape(-1),
+            fill_value=0.0,
+        )
+        mapped[f"Ti_{species}"] = (
+            np.asarray(interpolator(edat.triangle_mesh.incenter)) * scale
+        )
+    return mapped
+
+
+def get_temperatures(
+    edat,
+    eirene_path,
+    ion_temperature_values=None,
+    genex_triangulation=None,
+    *,
+    sparse_temperature_handler=default_sparse_temperature_handler,
+    pseudo_temperature_handler=(
+        default_single_species_pseudo_temperature_handler
+    ),
+    sparse_threshold=0.5,
+):
+    """Return explicit temperature arrays on the EIRENE triangle mesh."""
+    eirene_path = Path(eirene_path)
+    edat.read_ft46(eirene_path / "fort.46")
+    triangle_points = edat.triangle_mesh.incenter
+    temperatures = {}
+
+    for key, (particle_class, labels_key, prefix, pseudo) in (
+        TEMPERATURE_CLASS_INFO.items()
+    ):
+        density_block = edat.fort46["pden" + key]
+        raw_temperatures = []
+        labels = [label.strip() for label in edat.fort46[labels_key]]
+
+        for index, species in enumerate(labels):
+            density = density_block[:, index]
+            momentum_squared = sum(
+                edat.fort46[component + "den" + key][:, index] ** 2
+                for component in ("vx", "vy", "vz")
+            )
+            raw = _temperature_from_moments(
+                edat.fort46["eden" + key][:, index],
+                density,
+                momentum_squared,
+                edat.masses[particle_class][index],
+            )
+            raw_temperatures.append(raw)
+            handled = sparse_temperature_handler(
+                raw,
+                density,
+                triangle_points,
+                threshold=sparse_threshold,
+            )
+            if handled is not None:
+                temperatures[f"{prefix}_{species}"] = handled
+
+        # The default aggregation is intentionally limited to one physical
+        # species per particle class. Multi-species runs must inject a policy.
+        if raw_temperatures:
+            pseudo_raw, pseudo_density = pseudo_temperature_handler(
+                raw_temperatures,
+                density_block,
+                particle_class=particle_class,
+                species_labels=labels,
+            )
+            handled = sparse_temperature_handler(
+                pseudo_raw,
+                pseudo_density,
+                triangle_points,
+                threshold=sparse_threshold,
+            )
+            if handled is not None:
+                temperatures[f"{prefix}_{pseudo}"] = handled
+
+    if ion_temperature_values is not None:
+        if genex_triangulation is None:
+            raise ValueError(
+                "genex_triangulation is required with ion temperatures"
+            )
+        temperatures.update(
+            map_ion_temperatures_to_triangles(
+                edat, ion_temperature_values, genex_triangulation
+            )
+        )
+
+    return temperatures
 
 def prepare_fort31(edat, genex_data, eorder, iorder):
     # vExB = ExB_velocity() see analyze_moments.py

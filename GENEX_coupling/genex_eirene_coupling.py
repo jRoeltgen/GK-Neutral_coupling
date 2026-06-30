@@ -2,11 +2,16 @@
 import psutil
 from pathlib import Path
 from collections import defaultdict
-from interpolate import (interpolate_all_sources, interp_moments,
+from interpolate import (interpolate_all_sources, interpolate_source, interp_moments,
                          build_triangulation)
 from eirene_interface import (eirene_interface, run_eirene, prepare_fort31,
-                              status)
+                              get_temperatures, status)
+from temperature_mapping_utils import (
+    default_single_species_pseudo_temperature_handler,
+    default_sparse_temperature_handler,
+)
 import genex_interface
+import SourcePostProcessor as SPP
 from write_netcdf import write_sources_nc
 from os import (killpg, replace)
 from signal import SIGTERM
@@ -18,6 +23,7 @@ import shutil
 import argparse
 import re
 import faulthandler
+import scipy.constants as pyconst
 
 default_eirene_path = Path("/pscratch/sd/j/jonroelt/tcv_genex_coupling/coupled_run/")
 default_genex_path = Path("/pscratch/sd/j/jonroelt/source_testing/3D_source/branch_all_source_file_params/")
@@ -33,6 +39,11 @@ def main(args, deps=None):
             sleep=sleep,
             replace=replace,
             pid_exists=psutil.pid_exists,
+            collision_mappers=None,
+            sparse_temperature_handler=default_sparse_temperature_handler,
+            pseudo_temperature_handler=(
+                default_single_species_pseudo_temperature_handler
+            ),
         )
     dask.config.set(scheduler="synchronous")
     eirene_path = Path(args.eirene_path)
@@ -83,6 +94,15 @@ def main(args, deps=None):
             continue
         unnormalize_all(genex_fields)
         genex_fields_2D = genex_interface.toroidal_avg(genex_fields)
+        ion_temperature_values = {}
+        if not args.SumTemp:
+            ion_temperature_values = {
+                species.name: np.asarray(
+                    genex_fields_2D["Ttot"][species.name]
+                )
+                for species in genex_species
+                if not species.is_electron
+            }
         interpolated = interpolate_all_moments(b2dat.gmtry, tri,
                                                genex_fields_2D, pol_mask,
                                                rad_mask)
@@ -116,6 +136,8 @@ def main(args, deps=None):
         edat.load_extra_forts(eirene_path=eirene_path, coll_to_adjust=None,
                               convert_units=True)
 
+        interp_temperatures = None
+        write_temperatures = False
         if args.SumTemp:
             sources = {
                 mom: {
@@ -126,7 +148,33 @@ def main(args, deps=None):
                 for mom, species_dict in edat.sources.items()
             }
         else:
-            raise NotImplementedError("SumTemp=False not implemented")
+            temps = get_temperatures(
+                edat,
+                eirene_path,
+                ion_temperature_values,
+                tri,
+                sparse_temperature_handler=deps.sparse_temperature_handler,
+                pseudo_temperature_handler=deps.pseudo_temperature_handler,
+            )
+            spp = SPP.SourcePostProcessor(
+                edat.full_source_in_SI,
+                temps,
+                collision_mappers=deps.collision_mappers,
+            )
+            sources, temps = spp.regroup_by_temperature()
+            direct_ion_temperatures = {
+                f"Ti_{species}": np.asarray(value) * pyconst.elementary_charge
+                for species, value in ion_temperature_values.items()
+            }
+            interp_temperatures = interpolate_temperature_values(
+                edat.triangle_mesh,
+                temps,
+                grid_r,
+                grid_z,
+                compute,
+                direct_values=direct_ion_temperatures,
+            )
+            write_temperatures = True
 
         interp_sources = interpolate_all_sources_wrapper(
             edat.triangle_mesh, sources,
@@ -137,7 +185,13 @@ def main(args, deps=None):
         filename = args.filepattern + f"_{index:06d}" + ".nc"
         filename_tmp = filename + ".tmp"
         print(f"[{index}] Writing {filename_tmp}", flush=True)
-        deps.write_nc(filename_tmp, interp_sources, grid_r.size)
+        deps.write_nc(
+            filename_tmp,
+            interp_sources,
+            grid_r.size,
+            temperature_values=interp_temperatures,
+            write_temperature=write_temperatures,
+        )
         deps.replace(filename_tmp, filename)
         backup_eirene_files(eirene_path, index)
         index += 1
@@ -251,6 +305,51 @@ def interpolate_all_sources_wrapper(
                 vals_full[compute] = vals_sub
 
                 out[mom][target_species][source] = vals_full.reshape(1, n_full)
+
+    return out
+
+
+def interpolate_temperature_values(
+    tria,
+    temperature_values,
+    grid_r,
+    grid_z,
+    compute,
+    *,
+    direct_values=None,
+    method="linear",
+    fill_mode="constant",
+    fill_value=0.0,
+):
+    """Interpolate temperatures, bypassing interpolation for direct values."""
+    direct_values = direct_values or {}
+    r_sub = grid_r[compute]
+    z_sub = grid_z[compute]
+    n_full = len(grid_r)
+    out = {}
+
+    for label, values in temperature_values.items():
+        if label in direct_values:
+            values_sub = np.asarray(direct_values[label]).reshape(-1)
+            if values_sub.size != np.count_nonzero(compute):
+                raise ValueError(
+                    f"Direct temperature '{label}' has {values_sub.size} "
+                    f"values, expected {np.count_nonzero(compute)}"
+                )
+        else:
+            values_sub = interpolate_source(
+                tria,
+                values,
+                r_sub,
+                z_sub,
+                method=method,
+                fill_mode=fill_mode,
+                fill_value=fill_value,
+            ).reshape(-1)
+
+        values_full = np.zeros(n_full, dtype=values_sub.dtype)
+        values_full[compute] = values_sub
+        out[label] = values_full.reshape(1, n_full)
 
     return out
 
