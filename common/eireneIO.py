@@ -58,7 +58,7 @@ class eirene:
             self.fort44["meta"]["ver"] = ver
             self.fort44["meta"]["label"] = label
 
-            if ver not in (20081111, 20160829, 20170328, 20201006):
+            if ver not in (20081111, 20160829, 20170328, 20201006, 20240627):
                 raise ValueError("Ft44Reader: unknown fort.44 format version")
 
             # species counts

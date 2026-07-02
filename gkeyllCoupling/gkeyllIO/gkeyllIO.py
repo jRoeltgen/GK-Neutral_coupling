@@ -1,4 +1,3 @@
-
 # coding: utf-8
 import numpy as np
 import postgkyl as pg
@@ -62,11 +61,12 @@ class gkeyll:
         self.interpolated_surfz_data = {}
 
         if self.fast_reflection:
-            copper_data = np.genfromtxt('GK-Neutral_coupling/reflection_data/65_DonCu.txt', skip_header=1,delimiter=',')
+            dir_path = os.path.dirname(os.path.abspath(__file__))
+            copper_data = np.genfromtxt(dir_path + '/reflection_data/65_DonCu.txt', skip_header=1,delimiter=',')
             copper_data[:,0] = copper_data[:,0]*1000*self.eV # Convert from keV to J
             self.Cuinterpolator = interp1d(copper_data[:,0], copper_data[:,1], bounds_error=False, fill_value='extrapolate')
 
-            lithium_data = np.genfromtxt('GK-Neutral_coupling/reflection_data/65_DonLi.txt', skip_header=1,delimiter=',')
+            lithium_data = np.genfromtxt(dir_path + '/reflection_data/65_DonLi.txt', skip_header=1,delimiter=',')
             lithium_data[:,0] = lithium_data[:,0]*1000*self.eV # Convert from keV to J
             self.Liinterpolator = interp1d(lithium_data[:,0], lithium_data[:,1], bounds_error=False, fill_value='extrapolate')
 
@@ -426,16 +426,6 @@ class gkeyll:
             mom_data["Ri"] = Ri.T
             mom_data["Zi"] = Zi.T
         
-            #Get Plate angle information
-            if isim == 1 : 
-                plate_data = np.genfromtxt(self.sim_dir+"stepplate_data/highres/osol.txt", delimiter = ",")
-            if isim == 0 : 
-                plate_data = np.genfromtxt(self.sim_dir+"stepplate_data/highres/opf.txt", delimiter = ",")
-            if isim == 4 : 
-                plate_data = np.genfromtxt(self.sim_dir+"stepplate_data/highres/isol.txt", delimiter = ",")
-            if isim == 5 : 
-                plate_data = np.genfromtxt(self.sim_dir+"stepplate_data/highres/ipf.txt", delimiter = ",")
-        
             #Load moment data
             for species in self.species_list:
                 for mom in ["M0", "M1", "M2"]:
@@ -482,12 +472,6 @@ class gkeyll:
             val = val.squeeze()
             mom_data["phi"] = val
         
-            # Interpolate B ratio at plates
-            if isim in [1,0,4,5]:
-                Binterpolator = interp1d(plate_data[:,0], plate_data[:,1])
-                Bratio = Binterpolator(x)
-                mom_data["Bratio" ] = Bratio
-        
             #Save grids
             mom_data["x"] = x
             mom_data["z"] = z
@@ -517,13 +501,6 @@ class gkeyll:
         mom_data_list[6] = {}
         mom_data_list[4] = {}
         mom_data_list[5] = {}
-        #Do Bratio myself manually
-        mom_data_list[3]["Bratio"] = mom_data_list[1]["Bratio"]
-        mom_data_list[6]["Bratio"] = mom_data_list[8]["Bratio"]
-        mom_data_list[4]["Bratio"] = mom_data_list[0]["Bratio"]
-        mom_data_list[5]["Bratio"] = mom_data_list[9]["Bratio"]
-        
-        
         
         # Doubled blocks
         mom_data_list[2] = {}
@@ -602,30 +579,6 @@ class gkeyll:
         
         
         
-        for bi in range(12):
-            mom_data_list[bi]["wallflux"] = np.zeros(mom_data_list[bi]["elcM0"].shape)
-            mom_data_list[bi]["plateflux"] = np.zeros(mom_data_list[bi]["elcM0"].shape)
-        
-        # Now look at Particle Flux to Side Wall. Use surface method
-        D = 0.22
-        edge_inds = [-1, 0,0,0, -1,-1, 0,0,0, -1]
-        for bi in [0,1,2,3,4,5,6,7,8,9]:
-            diff_density_surf = {}
-            for species in ["ion"]:
-                diff_density_surf[species] = 0.0
-                edge_ind = edge_inds[bi]
-                dM0dx = np.gradient(mom_data_list[bi]["ionM0"], mom_data_list[bi]["x"], axis=0, edge_order=2)
-                sign = 1
-                mom_data_list[bi]["wallflux"][edge_ind] = sign*D*dM0dx[edge_ind]*np.sqrt(mom_data_list[bi]["gxx"][edge_ind])
-        
-        #Calculate Particle Flux
-        total_pflux = 0
-        zedge = [0, 0, -1, -1, 0, 0, -1, -1]
-        for bi, bidx in enumerate([0, 1, 3,4, 5, 6, 8,9]):
-            sign = -1
-            mom_data_list[bidx]["plateflux"][:, zedge[bi]] = sign*mom_data_list[bidx]["ionM1"][:, zedge[bi]]*mom_data_list[bidx]["Bratio"]/np.sqrt(mom_data_list[bidx]["gzz"][:, zedge[bi]])
-        
-        
         self.Rall = np.array([])
         self.Zall = np.array([])
         self.niall = np.array([])
@@ -634,8 +587,6 @@ class gkeyll:
         self.Teall = np.array([])
         self.upariall = np.array([])
         self.phiall = np.array([])
-        self.GammaRadall = np.array([])
-        self.GammaParall = np.array([])
         bmax=12
         for i in range(self.bmin,bmax):
             self.Rall = np.append(self.Rall, mom_data_list[i]["Ri"].flatten())
@@ -646,18 +597,6 @@ class gkeyll:
             self.Teall = np.append(self.Teall, mom_data_list[i]["elcTemp"].flatten())
             self.upariall = np.append(self.upariall, mom_data_list[i]["ionUpar"].flatten())
             self.phiall = np.append(self.phiall, mom_data_list[i]["phi"].flatten())
-            self.GammaRadall = np.append(self.GammaRadall, mom_data_list[i]["wallflux"].flatten())
-            self.GammaParall = np.append(self.GammaParall, mom_data_list[i]["plateflux"].flatten())
-        
-        #alldata = np.column_stack((Rall, Zall, niall, neall, Tiall, Teall, upariall, phiall, GammaRadall, GammaParall))
-        #np.savetxt("./gkeyll_text_output/ehl2data.txt", alldata,  header='R Z ni ne Ti Te upari phi Gamma_R Gamma_Z', comments='')
-        
-        #celldata = np.zeros((12,3), dtype="int")
-        #for i in range(bmin,bmax):
-        #    nR = mom_data_list[i]["ionM0"].shape[0]
-        #    nZ = mom_data_list[i]["ionM0"].shape[1]
-        #    celldata[i] = np.r_[i, nR, nZ]
-        #np.savetxt("./gkeyll_text_output/cells_ehl2data.txt", celldata,  header='blockid nR nZ', comments='', fmt="%d")
         
         print("Processed Gkeyll output for frame %d"%frame)
     

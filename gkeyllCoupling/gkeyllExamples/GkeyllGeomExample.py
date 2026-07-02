@@ -184,7 +184,7 @@ inp = [inp0, inp1, inp2, inp3, inp4, inp5, inp6, inp7, inp8, inp9, inp10, inp11]
 
 #If not loading from file do this:
 
-#gefit = gkeyllEFIT.gkeyllEFIT('./test_data/gkeyll_data/', 'step')
+#gefit = gkeyllEFIT.gkeyllEFIT('../../tests/test_data/gkeyll_data/', 'step')
 #gefit.load_eqdsk()
 #gefit.find_xpts()
 ## Can replace find_xpts with the line below to save time
@@ -195,7 +195,7 @@ inp = [inp0, inp1, inp2, inp3, inp4, inp5, inp6, inp7, inp8, inp9, inp10, inp11]
 #gg.write()
 
 #If loading from file we can do this:
-gg = gkeyllGeom.gkeyllGeom('./gkeyllGeometry/stored_data/gkeyllGeometry.pkl')
+gg = gkeyllGeom.gkeyllGeom('../gkeyllGeometry/stored_data/gkeyllGeometry.pkl')
 
 
 
@@ -203,7 +203,7 @@ gg = gkeyllGeom.gkeyllGeom('./gkeyllGeometry/stored_data/gkeyllGeometry.pkl')
 
 #Cell centers
 #import B2IO as b2
-#b2dat = b2.B2("./test_data/b2_data/")
+#b2dat = b2.B2("../../tests/test_data/b2_data/")
 #R = b2dat.gmtry["crx"].mean(axis=2)
 #Z = b2dat.gmtry["cry"].mean(axis=2)
 #
@@ -214,12 +214,12 @@ gg = gkeyllGeom.gkeyllGeom('./gkeyllGeometry/stored_data/gkeyllGeometry.pkl')
 #        print(i,j)
 #        ptb[i,j] = gg.psitheta(R[i,j], Z[i,j])
 #
-#np.save("./gkeyllGeometry/stored_data/gkeyll_b2_coordmapping.npy", ptb)
+#np.save("../gkeyllGeometry/stored_data/gkeyll_b2_coordmapping.npy", ptb)
 
 
 # R surfaces
 #import B2IO as b2
-#b2dat = b2.B2("./test_data/b2_data/")
+#b2dat = b2.B2("../../tests/test_data/b2_data/")
 #R = b2dat.gmtry["crx"][:,:,[2,3]].mean(axis=2)
 #Z = b2dat.gmtry["cry"][:,:,[2,3]].mean(axis=2)
 #
@@ -230,11 +230,11 @@ gg = gkeyllGeom.gkeyllGeom('./gkeyllGeometry/stored_data/gkeyllGeometry.pkl')
 #        print(i,j)
 #        ptb[i,j] = gg.psitheta(R[i,j], Z[i,j])
 #
-#np.save("./gkeyllGeometry/stored_data/gkeyll_b2_coordmapping_radialfaces.npy", ptb)
+#np.save("../gkeyllGeometry/stored_data/gkeyll_b2_coordmapping_radialfaces.npy", ptb)
 
 # Z surfaces
 #import B2IO as b2
-#b2dat = b2.B2("./test_data/b2_data/")
+#b2dat = b2.B2("../../tests/test_data/b2_data/")
 #R = b2dat.gmtry["crx"][:,:,[0,2]].mean(axis=2)
 #Z = b2dat.gmtry["cry"][:,:,[0,2]].mean(axis=2)
 #
@@ -244,4 +244,4 @@ gg = gkeyllGeom.gkeyllGeom('./gkeyllGeometry/stored_data/gkeyllGeometry.pkl')
 #    for j in range(R.shape[1]):
 #        print(i,j)
 #        ptb[i,j] = gg.psitheta(R[i,j], Z[i,j])
-#np.save("./gkeyllGeometry/stored_data/gkeyll_b2_coordmapping_parallelfaces.npy", ptb)
+#np.save("../gkeyllGeometry/stored_data/gkeyll_b2_coordmapping_parallelfaces.npy", ptb)

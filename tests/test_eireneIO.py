@@ -1,3 +1,6 @@
+import sys
+target_dir = "../common/"
+sys.path.insert(0, target_dir)
 import filecmp
 import sys
 if sys.version_info < (3, 6):
