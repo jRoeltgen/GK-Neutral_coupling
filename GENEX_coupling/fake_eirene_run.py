@@ -7,7 +7,16 @@ from temperature_mapping_utils import (
     default_sparse_temperature_handler,
 )
 from CheckedRunEirene import CheckedRunEirene
+from CheckedRunEirene import (
+    COLLISION_TEMPERATURE_CONFIG,
+    DEFAULT_TEMPERATURE_COLLISIONS,
+    checked_collision_mappers,
+    checked_sparse_temperature_handler,
+    validate_temperature_collisions,
+)
 import os, signal, psutil
+from functools import partial
+from netCDF4 import Dataset
 import time
 import subprocess
 import cProfile
@@ -19,7 +28,13 @@ import pdb
 
 dask.config.set(scheduler='synchronous')
 
-def test_full_coupling(tmp_path, override, fake=-1):
+def test_full_coupling(
+    tmp_path,
+    override,
+    fake=-1,
+    temperature_mode="summed",
+    collision_types=None,
+):
     from types import SimpleNamespace
     print("=== PYTHON ENTRY REACHED ===", flush=True)
     pid = int(Path("genex.pid").read_text())
@@ -31,14 +46,26 @@ def test_full_coupling(tmp_path, override, fake=-1):
         genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test"
     eirene_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test/eirene_setup_files"
 
-    checked_runner = CheckedRunEirene()
+    if temperature_mode == "multiple_temperatures":
+        collision_types = validate_temperature_collisions(
+            collision_types or DEFAULT_TEMPERATURE_COLLISIONS
+        )
+    elif temperature_mode == "summed":
+        collision_types = ()
+    else:
+        raise ValueError(f"Unknown temperature mode: {temperature_mode}")
+
+    checked_runner = CheckedRunEirene(
+        mode=temperature_mode,
+        collision_types=collision_types or None,
+    )
     print(f"Using file from genex_path: {genex_path}", flush=True)
     try:
         args = SimpleNamespace(
             pid=pid,
             MAX_TIMEOUTS=1,
             eirene_time=1,
-            SumTemp=True,
+            SumTemp=temperature_mode == "summed",
             filepattern=tmp_path + "input_sources_",
             genex_time_index_override=override,
             genex_path=genex_path,
@@ -48,13 +75,24 @@ def test_full_coupling(tmp_path, override, fake=-1):
 
         deps = SimpleNamespace(
             run_eirene=checked_runner,
-            write_nc=checked_write_nc,   # wrapped
+            write_nc=partial(
+                checked_write_nc,
+                mode=temperature_mode,
+                collision_types=collision_types,
+            ),
             killpg=lambda pid, sig: cancel_slurm_job(),
             sleep=lambda x: time.sleep(0.1),
             replace=os.replace,
             pid_exists=psutil.pid_exists,
-            collision_mappers=None,
-            sparse_temperature_handler=default_sparse_temperature_handler,
+            collision_mappers=(
+                checked_collision_mappers(collision_types)
+                if collision_types else None
+            ),
+            sparse_temperature_handler=(
+                checked_sparse_temperature_handler
+                if collision_types
+                else default_sparse_temperature_handler
+            ),
             pseudo_temperature_handler=(
                 default_single_species_pseudo_temperature_handler
             ),
@@ -97,22 +135,119 @@ def test_full_coupling(tmp_path, override, fake=-1):
     # ensure actual variation (not just noise)
     rounded = np.round(checked_runner.history, 10)
     assert len(set(rounded)) > 1, "Density did not meaningfully change"
+    if collision_types:
+        for collision in collision_types:
+            values = checked_runner.location_history[collision]
+            assert len(values) > 1
+            assert not np.allclose(
+                values[1:], values[:-1], rtol=1e-8, atol=0.0
+            ), f"Density did not evolve near the {collision} source"
 
-def checked_write_nc(filename, interp_sources, dim_RZ):
-    import numpy as np
+def checked_write_nc(
+    filename,
+    interp_sources,
+    dim_RZ,
+    temperature_values=None,
+    write_temperature=False,
+    *,
+    mode="summed",
+    collision_types=(),
+):
 
     # --- check BEFORE writing ---
+    source_by_temperature = {}
     for field, species_dict in interp_sources.items():
-        for sp, arr in species_dict.items():
-            arr_np = np.asarray(arr["SUM"])
-            assert np.isfinite(arr_np).all(), \
-                f"NaNs in interpolated sources ({field}, {sp})"
+        for species, temperature_dict in species_dict.items():
+            for temperature, values in temperature_dict.items():
+                arr = np.asarray(values)
+                assert np.isfinite(arr).all(), (
+                    f"NaNs in interpolated sources "
+                    f"({field}, {species}, {temperature})"
+                )
+                assert np.any(arr != 0), (
+                    f"Degenerate zero field "
+                    f"({field}, {species}, {temperature})"
+                )
+                source_by_temperature.setdefault(temperature, []).append(
+                    (field, species, arr)
+                )
 
-            assert not np.all(arr_np == 0), \
-                f"Degenerate zero field ({field}, {sp})"
+    if mode == "summed":
+        assert set(source_by_temperature) == {"SUM"}
+    else:
+        assert write_temperature
+        assert temperature_values is not None
+        expected_labels = {}
+        for collision in collision_types:
+            prefix = COLLISION_TEMPERATURE_CONFIG[collision]["prefix"]
+            labels = [
+                label
+                for label in source_by_temperature
+                if label is not None and label.startswith(prefix)
+            ]
+            assert len(labels) == 1, (
+                f"Expected one {prefix} source group, found {labels}"
+            )
+            expected_labels[collision] = labels[0]
+
+        assert set(source_by_temperature) == set(expected_labels.values())
+        temperature_arrays = []
+        for collision, label in expected_labels.items():
+            temperature = np.asarray(temperature_values[label])
+            assert temperature.shape == (1, dim_RZ)
+            assert np.isfinite(temperature).all(), (
+                f"{collision} temperature '{label}' contains non-finite values"
+            )
+            assert np.ptp(temperature) > 0, (
+                f"{collision} temperature is not spatially varying"
+            )
+            for _, _, source in source_by_temperature[label]:
+                support = np.abs(source) > 1e-5 * np.max(np.abs(source))
+                assert np.any(support)
+                supported_temperature = temperature[support]
+                assert np.isfinite(supported_temperature).all()
+                if supported_temperature.size > 1:
+                    scale = np.max(np.abs(supported_temperature))
+                    assert np.ptp(supported_temperature) > 1e-12 * scale, (
+                        f"{collision} temperature does not vary across its "
+                        "source support"
+                    )
+            temperature_arrays.append(temperature)
+
+        for first in range(len(temperature_arrays)):
+            for second in range(first + 1, len(temperature_arrays)):
+                assert not np.allclose(
+                    temperature_arrays[first],
+                    temperature_arrays[second],
+                    rtol=1e-8,
+                    atol=0.0,
+                ), "Two checked temperature groups are spatially identical"
 
     # call real writer
-    write_sources_nc(filename, interp_sources, dim_RZ)
+    write_sources_nc(
+        filename,
+        interp_sources,
+        dim_RZ,
+        temperature_values=temperature_values,
+        write_temperature=write_temperature,
+    )
+
+    if mode != "summed":
+        with Dataset(filename) as nc:
+            ids = []
+            for label, entries in source_by_temperature.items():
+                group = nc.groups[f"temperature_{label}"]
+                ids.append(group.temperature_id)
+                np.testing.assert_allclose(
+                    group.variables["temperature"][:],
+                    temperature_values[label],
+                )
+                for field, species, expected in entries:
+                    np.testing.assert_allclose(
+                        group.groups[species].variables[field][:],
+                        expected,
+                    )
+            assert len(ids) == len(set(ids))
 
 def kill_tree(pid):
     try:

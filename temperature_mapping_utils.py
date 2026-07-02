@@ -23,7 +23,7 @@ def default_sparse_temperature_handler(
             "triangle_points must have shape (temperature.size, 2)"
         )
 
-    valid = density > 0
+    valid = (density > 0) & np.isfinite(temperature)
     if not np.any(valid) or np.count_nonzero(~valid) / density.size > threshold:
         return None
     if np.all(valid):

@@ -26,7 +26,13 @@ class eirene:
         if sys.version_info < (3, 10):
             print("Python version 3.10 or greater needed for match/case in load_extra_forts")
             return
-        self.fort44 = {"meta":{}, "neut":{}, "wld":{}, "res":{}}
+        self.fort44 = {
+            "meta": {},
+            "neut": {},
+            "neut_int": {},
+            "wld": {},
+            "res": {},
+        }
         self.fort44_expanded = {}
         self.fort46 = {}
         self.triangle_mesh = triangles.triangle_mesh(filepath)

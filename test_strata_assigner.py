@@ -82,6 +82,26 @@ def test_plasma_plasma_volume_recombination_assignment():
     assert t_strata == [22, "SUM"]
 
 
+def test_plasma_plasma_strata_lookup_is_case_insensitive():
+    sa = make_assigner(
+        requested_strata=(11, "SUM"),
+        vol_rec={"particle": {"IONS": {11}}, "energy": {}},
+    )
+
+    ingest_series(sa, [
+        ("particle", "plasma-plasma", "bulk_ions", "ions", np.array([0.0])),
+        ("particle", "plasma-plasma", "bulk_ions", "ions", np.array([2.0])),
+    ])
+
+    assert get_strata(
+        sa, "particle", "plasma-plasma", "ions"
+    ) == [11, "SUM"]
+    np.testing.assert_array_equal(
+        sa.sources["particle"]["plasma-plasma"]["ions"]["SUM"],
+        np.array([2.0]),
+    )
+
+
 # ============================================================
 # STRATUM SKIPPING (BUG REGRESSION TEST)
 # ============================================================

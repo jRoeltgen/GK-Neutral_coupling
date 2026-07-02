@@ -123,8 +123,13 @@ class StrataAssigner:
 
         allowed = None
         if collision == "plasma-plasma":
-            raw = self.volume_recombination["particle"].get(species, set())
-            raw2 = self.volume_recombination["energy"].get(species, set())
+            normalized_species = self._upper_name(species)
+            raw = self.volume_recombination["particle"].get(
+                normalized_species, set()
+            )
+            raw2 = self.volume_recombination["energy"].get(
+                normalized_species, set()
+            )
             if isinstance(raw, (int, str)) and isinstance(raw2, (int,str)):
                 allowed = {raw, raw2, "SUM"}
             else:
@@ -242,10 +247,15 @@ class StrataAssigner:
 
     def _allowed_strata_for_species(self, species):
         allowed = set()
-        if species in self.volume_recombination["particle"]:
-            allowed.update(self.volume_recombination["particle"][species])
-        if species in self.volume_recombination["energy"]:
-            allowed.update(self.volume_recombination["energy"][species])
+        normalized_species = self._upper_name(species)
+        if normalized_species in self.volume_recombination["particle"]:
+            allowed.update(
+                self.volume_recombination["particle"][normalized_species]
+            )
+        if normalized_species in self.volume_recombination["energy"]:
+            allowed.update(
+                self.volume_recombination["energy"][normalized_species]
+            )
         allowed.add("SUM")
         return allowed
 
@@ -614,9 +624,10 @@ class StrataAssigner:
                 for species in c_map.keys():
                     if self._contains_any(species_patt_to_ignore, species):
                         continue
+                    normalized_species = self._upper_name(species)
                     found = False
                     for domain in self.expected_species_by_particle_class.values():
-                        if species in domain:
+                        if normalized_species in domain:
                             found = True
                             break
                     if not found:
@@ -634,7 +645,10 @@ class StrataAssigner:
                 found = False
                 for m in self.sources:
                     for c in self.sources[m]:
-                        if sp in self.sources[m][c]:
+                        if any(
+                            self._upper_name(source_species) == sp
+                            for source_species in self.sources[m][c]
+                        ):
                             found = True
                             break
 
@@ -738,7 +752,8 @@ class StrataAssigner:
 
         # -------- species validation --------
         species_expected = any(
-            species in domain for domain in self.expected_species_by_particle_class.values()
+            self._upper_name(species) in domain
+            for domain in self.expected_species_by_particle_class.values()
         )
         species_color = Fore.GREEN if species_expected else Fore.RED
 

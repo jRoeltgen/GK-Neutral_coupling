@@ -5,6 +5,7 @@ from genex_eirene_coupling import (main, status, interpolate_all_moments,
                                    check_species_consistency,
                                    interpolate_all_sources_wrapper,
                                    interpolate_temperature_values,
+                                   prepare_genex_ion_temperatures,
                                    normalize_genex_params,
                                    backup_eirene_files,
                                    next_eirene_index)
@@ -284,7 +285,7 @@ def test_main_sumtemp_false_writes_temperatures(coupling_env, monkeypatch):
     env = coupling_env
     env["args"].SumTemp = False
     env["mod"].genex_interface.toroidal_avg.return_value = {
-        "Ttot": {"D": np.array([4.0])}
+        "Ttot": {"D": np.array([4.0])},
     }
     env["edat"].full_source_in_SI = {}
     monkeypatch.setattr(
@@ -304,7 +305,9 @@ def test_main_sumtemp_false_writes_temperatures(coupling_env, monkeypatch):
     )
 
     custom_mappers = {"atom-plasma": MagicMock()}
-    custom_sparse_handler = MagicMock()
+    custom_sparse_handler = MagicMock(
+        side_effect=lambda temperature, density, points, threshold: temperature
+    )
     custom_pseudo_handler = MagicMock()
     env["deps"].collision_mappers = custom_mappers
     env["deps"].sparse_temperature_handler = custom_sparse_handler
@@ -350,6 +353,45 @@ def test_main_filters_sources_to_sum_only(coupling_env):
     np.testing.assert_array_equal(
         source_arg["particle"]["ELECTRONS"]["SUM"], np.array([3.0])
     )
+
+
+def test_prepare_genex_ion_temperatures_fills_nonfinite_values():
+    from temperature_mapping_utils import default_sparse_temperature_handler
+
+    species = [
+        SimpleNamespace(name="D", is_electron=False),
+        SimpleNamespace(name="e", is_electron=True),
+    ]
+    fields = {
+        "Ttot": {"D": np.array([2.0, np.nan, 0.0])},
+    }
+    compute = np.array([True, True, True])
+
+    result = prepare_genex_ion_temperatures(
+        fields,
+        species,
+        np.array([0.0, 1.0, 2.0]),
+        np.zeros(3),
+        compute,
+        default_sparse_temperature_handler,
+    )
+
+    np.testing.assert_array_equal(result["D"], np.full(3, 2.0))
+
+
+def test_prepare_genex_ion_temperatures_omits_no_usable_samples():
+    from temperature_mapping_utils import default_sparse_temperature_handler
+
+    result = prepare_genex_ion_temperatures(
+        {"Ttot": {"D": np.array([0.0, np.nan])}},
+        [SimpleNamespace(name="D", is_electron=False)],
+        np.array([0.0, 1.0]),
+        np.zeros(2),
+        np.array([True, True]),
+        default_sparse_temperature_handler,
+    )
+
+    assert result == {}
 
 def test_check_species_consistency_raises():
     eirene_species = ["D"]

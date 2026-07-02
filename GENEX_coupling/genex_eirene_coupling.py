@@ -96,13 +96,14 @@ def main(args, deps=None):
         genex_fields_2D = genex_interface.toroidal_avg(genex_fields)
         ion_temperature_values = {}
         if not args.SumTemp:
-            ion_temperature_values = {
-                species.name: np.asarray(
-                    genex_fields_2D["Ttot"][species.name]
-                )
-                for species in genex_species
-                if not species.is_electron
-            }
+            ion_temperature_values = prepare_genex_ion_temperatures(
+                genex_fields_2D,
+                genex_species,
+                grid_r,
+                grid_z,
+                compute,
+                deps.sparse_temperature_handler,
+            )
         interpolated = interpolate_all_moments(b2dat.gmtry, tri,
                                                genex_fields_2D, pol_mask,
                                                rad_mask)
@@ -217,6 +218,46 @@ def unnormalize_all(genex_out):
     for field, field_block in genex_out.items():
         for species, value in field_block.items():
             genex_out[field][species] = genex_interface.unnormalize(value)
+
+
+def prepare_genex_ion_temperatures(
+    genex_fields_2D,
+    genex_species,
+    grid_r,
+    grid_z,
+    compute,
+    sparse_temperature_handler,
+):
+    """Nearest-fill GENE-X ion temperatures from any usable samples."""
+    points = np.column_stack([grid_r[compute], grid_z[compute]])
+    temperatures = {}
+
+    for species in genex_species:
+        if species.is_electron:
+            continue
+        temperature = np.asarray(
+            genex_fields_2D["Ttot"][species.name]
+        ).reshape(-1)
+        if temperature.size != points.shape[0]:
+            raise ValueError(
+                f"GENE-X temperature size for '{species.name}' "
+                f"does not match the active grid"
+            )
+        # Density is deliberately not consulted here. GENE-X owns the
+        # validity of zero-density compute cells; this step only fills missing
+        # temperature samples when at least one finite, nonzero value exists.
+        available = np.isfinite(temperature) & (temperature != 0)
+        availability = available.astype(float)
+        handled = sparse_temperature_handler(
+            temperature,
+            availability,
+            points,
+            threshold=1.0,
+        )
+        if handled is not None:
+            temperatures[species.name] = handled
+
+    return temperatures
 
 def interpolate_all_moments(gmtry, tri, genex_out, radial_mask, poloidal_mask):
     out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
