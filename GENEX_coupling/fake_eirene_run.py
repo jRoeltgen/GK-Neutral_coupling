@@ -34,17 +34,16 @@ def test_full_coupling(
     fake=-1,
     temperature_mode="summed",
     collision_types=None,
+    genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test",
 ):
     from types import SimpleNamespace
     print("=== PYTHON ENTRY REACHED ===", flush=True)
     pid = int(Path("genex.pid").read_text())
+    eirene_path = genex_path + "/eirene_setup_files"
     if fake==-1:
         genex_path = "/pscratch/sd/j/jonroelt/D3D_184833_t4800ms_try10/"
     elif fake==0:
         genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/test_script_wo_genex_my_data"
-    else:
-        genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test"
-    eirene_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test/eirene_setup_files"
 
     if temperature_mode == "multiple_temperatures":
         collision_types = validate_temperature_collisions(

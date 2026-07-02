@@ -140,10 +140,20 @@ class CheckedRunEirene:
 
     def __call__(self, timeout, eirene_path, command=None):
         # --- Read current GENE-X state (what EIRENE would see) ---
-        self.edat.read_ft31(eirene_path / Path("fort.31"), 192, 38, 1)
+        b2dat = B2IO.B2(eirene_path)
+        nx, ny = b2dat.gmtry["vol"].shape
+        parser = EireneInputParser(eirene_path / "input.dat")
+        parser.parse_requested_strata()
+        parser.parse_species()
+        ns = len(parser.species["bulk_ions"])
+        self.edat.read_ft31(
+            eirene_path / Path("fort.31"),
+            nx,
+            ny,
+            ns,
+        )
         self.edat.triangle_mesh = triangles.triangle_mesh(eirene_path)
         self.edat.triangle_mesh.calc_incenter()
-        b2dat = B2IO.B2(eirene_path)
         n = self.edat.fort31["na"]
 
         # --- Density checks (this is your GENE-X validation) ---
@@ -219,8 +229,25 @@ class CheckedRunEirene:
         assert fraction_small > 0.9, "Source not sufficiently localized"
 
         # --- Write fort files ---
-        self.write_fort_source(eirene_path / "fort.100", source, "ELECTRONS")
-        self.write_fort_source(eirene_path / "fort.105", source, "ions")
+        output_strata = requested_strata_output_order(
+            parser.requested_strata
+        )
+        strata_values = [
+            source if stratum == "SUM" else np.zeros_like(source)
+            for stratum in output_strata
+        ]
+        self.write_fort_source(
+            eirene_path / "fort.100",
+            source,
+            parser.species["electrons"][0],
+            strata_values=strata_values,
+        )
+        self.write_fort_source(
+            eirene_path / "fort.105",
+            source,
+            parser.species["bulk_ions"][0],
+            strata_values=strata_values,
+        )
 
         return status.SUCCESS
 

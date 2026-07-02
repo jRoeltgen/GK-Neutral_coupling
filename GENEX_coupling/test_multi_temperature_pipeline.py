@@ -163,6 +163,23 @@ def test_requested_strata_output_order_places_sum_last():
     ]
 
 
+def test_checked_fort_source_writes_one_block_per_stratum(tmp_path):
+    runner = CheckedRunEirene()
+    source = np.array([1.0, 2.0, 3.0])
+    filepath = tmp_path / "fort.105"
+
+    runner.write_fort_source(
+        filepath,
+        source,
+        "ions",
+        strata_values=[np.zeros_like(source), source],
+    )
+
+    contents = filepath.read_text()
+    assert contents.count("PARTICLE SOURCE FROM") == 2
+    assert contents.count(" 3.000000E+00") == 1
+
+
 def test_checked_mappers_ignore_pseudo_temperature_labels():
     mapper = checked_collision_mappers(
         ("atom-plasma", "plasma-plasma")
