@@ -97,7 +97,6 @@ def test_full_coupling(
             ),
         )
 
-        #if fake:
         profiler = cProfile.Profile()
         profiler.enable()
         print("Calling main...", flush=True)
@@ -107,8 +106,6 @@ def test_full_coupling(
         stats = pstats.Stats(profiler)
         stats.sort_stats("cumtime")
         stats.print_stats(30)
-        # else:
-        #     main(args, deps=deps)
 
     except Exception:
         print("Python error: canceling job...", flush=True)
@@ -265,66 +262,3 @@ def cancel_slurm_job():
         time.sleep(1)
     else:
         raise RuntimeError("Not running inside a SLURM job")
-
-
-# class DensityTracker:
-#     def __init__(self):
-#         self.prev_norm = None
-#         self.history = []
-
-#     def check(self, n):
-#         import numpy as np
-
-#         assert np.isfinite(n).all(), "NaNs in GENE-X density"
-
-#         norm = np.linalg.norm(n)
-#         self.history.append(norm)
-
-#         if self.prev_norm is not None:
-#             assert norm != self.prev_norm, "Density not evolving"
-
-#         self.prev_norm = norm
-
-# def checked_run_eirene(edat, timeout, eirene_path):
-#     status_code = fake_run_eirene(edat, eirene_path)
-
-#     # --- sanity checks on EIRENE outputs ---
-#     fort100 = eirene_path / "fort.100"
-#     fort105 = eirene_path / "fort.105"
-
-#     for f in (fort100, fort105):
-#         with open(f) as fh:
-#             for line in fh:
-#                 if "E+" in line or "E-" in line:
-#                     val = float(line.split()[-1])
-#                     assert np.isfinite(val), f"NaN/inf in {f}"
-#     tracker.check()
-#     return status_code
-
-
-
-# def fake_run_eirene(edat, eirene_path):
-#     # 1. Extract interpolated density from fort.31 or cached state
-#     edat_local = eirene()
-#     edat_local.read_ft31(eirene_path / Path("fort.31"))
-#     n = edat_local.fort31["na"]
-#     R = edat.triangle_mesh.incenter[0,:]
-#     Z = edat.triangle_mesh.incenter[1,:]
-
-#     counter *= -1
-
-#     # 2. Build synthetic source
-#     R0, Z0 = 2.272, 0.0
-#     sigmasq_z = 0.01
-#     sigmasq_r = 0.00003
-#     dt = 1e-7
-
-#     gaussian = np.exp(-((R - R0)**2)/sigmasq_r - ((Z - Z0)**2)/sigmasq_z)
-#     source = n * gaussian * counter / dt
-
-#     # 3. Write fort files
-#     write_fort_source(eirene_path / "fort.100", source, "ELECTRONS")
-
-#     write_fort_source(eirene_path / "fort.105", source, "ions")
-
-#     return status.SUCCESS
