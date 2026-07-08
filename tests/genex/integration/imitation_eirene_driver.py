@@ -6,8 +6,8 @@ from neutral_coupling.common.temperature_mapping_utils import (
     default_single_species_pseudo_temperature_handler,
     default_sparse_temperature_handler,
 )
-from .checked_run_eirene import CheckedRunEirene
-from .checked_run_eirene import (
+from imitation_eirene_checker import (
+    CheckedRunEirene,
     COLLISION_TEMPERATURE_CONFIG,
     DEFAULT_TEMPERATURE_COLLISIONS,
     checked_collision_mappers,
@@ -31,19 +31,16 @@ dask.config.set(scheduler='synchronous')
 def test_full_coupling(
     tmp_path,
     override,
-    fake=-1,
     temperature_mode="summed",
     collision_types=None,
     genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test",
+    eirene_path = None,
 ):
     from types import SimpleNamespace
     print("=== PYTHON ENTRY REACHED ===", flush=True)
     pid = int(Path("genex.pid").read_text())
-    eirene_path = genex_path + "/eirene_setup_files"
-    if fake==-1:
-        genex_path = "/pscratch/sd/j/jonroelt/D3D_184833_t4800ms_try10/"
-    elif fake==0:
-        genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/test_script_wo_genex_my_data"
+    if eirene_path == None:
+        eirene_path = genex_path + "/eirene_setup_files"
 
     if temperature_mode == "multiple_temperatures":
         collision_types = validate_temperature_collisions(
@@ -65,7 +62,7 @@ def test_full_coupling(
             MAX_TIMEOUTS=1,
             eirene_time=1,
             SumTemp=temperature_mode == "summed",
-            filepattern=tmp_path + "input_sources_",
+            filepattern=tmp_path + "input_sources",
             genex_time_index_override=override,
             genex_path=genex_path,
             eirene_path=eirene_path,
@@ -103,6 +100,32 @@ def test_full_coupling(
         main(args, deps=deps)
         profiler.disable()
 
+        # Check if GENEX is still alive
+        if psutil.pid_exists(pid):
+            # This should not happen → signal a bug, not normal cleanup
+            print("ERROR: main() returned but GENEX is still running", flush=True)
+            cancel_slurm_job()
+            kill_tree(pid)
+            raise RuntimeError("Invariant violated: GENEX still running after main()")
+        else:
+            print("Clean completion: leaving job to exit normally.", flush=True)
+
+        # --- post-run checks ---
+        assert len(checked_runner.history) > 1
+
+        # ensure actual variation (not just noise)
+        rounded = np.round(checked_runner.history, 10)
+        assert len(set(rounded)) > 1, "Density did not meaningfully change"
+        if collision_types:
+            for collision in collision_types:
+                values = checked_runner.location_history[collision]
+                assert len(values) > 1
+                assert not np.allclose(
+                    values[1:], values[:-1], rtol=1e-8, atol=0.0
+                ), f"Density did not evolve near the {collision} source"
+        else:
+            checked_runner.assert_summed_source_updates_used(eirene_path)
+
         stats = pstats.Stats(profiler)
         stats.sort_stats("cumtime")
         stats.print_stats(30)
@@ -114,30 +137,6 @@ def test_full_coupling(
         cancel_slurm_job()
         kill_tree(pid)
         raise  # preserve failure for Slurm
-
-    # Check if GENEX is still alive
-    if psutil.pid_exists(pid):
-        # This should not happen → signal a bug, not normal cleanup
-        print("ERROR: main() returned but GENEX is still running", flush=True)
-        cancel_slurm_job()
-        kill_tree(pid)
-        raise RuntimeError("Invariant violated: GENEX still running after main()")
-    else:
-        print("Clean completion: leaving job to exit normally.", flush=True)
-
-    # --- post-run checks ---
-    assert len(checked_runner.history) > 1
-
-    # ensure actual variation (not just noise)
-    rounded = np.round(checked_runner.history, 10)
-    assert len(set(rounded)) > 1, "Density did not meaningfully change"
-    if collision_types:
-        for collision in collision_types:
-            values = checked_runner.location_history[collision]
-            assert len(values) > 1
-            assert not np.allclose(
-                values[1:], values[:-1], rtol=1e-8, atol=0.0
-            ), f"Density did not evolve near the {collision} source"
 
 def checked_write_nc(
     filename,
@@ -170,6 +169,7 @@ def checked_write_nc(
 
     if mode == "summed":
         assert set(source_by_temperature) == {"SUM"}
+        _check_summed_source_signs(source_by_temperature["SUM"])
     else:
         assert write_temperature
         assert temperature_values is not None
@@ -228,7 +228,9 @@ def checked_write_nc(
         write_temperature=write_temperature,
     )
 
-    if mode != "summed":
+    if mode == "summed":
+        _check_written_summed_sources(filename, source_by_temperature["SUM"])
+    else:
         with Dataset(filename) as nc:
             ids = []
             for label, entries in source_by_temperature.items():
@@ -244,6 +246,52 @@ def checked_write_nc(
                         expected,
                     )
             assert len(ids) == len(set(ids))
+
+
+def _source_sign_summary(values):
+    arr = np.asarray(values, dtype=float)
+    magnitude = np.abs(arr)
+    max_abs = float(np.max(magnitude))
+    active = magnitude > 1e-12 * max_abs
+    if not np.any(active):
+        raise AssertionError("No active source cells found")
+    active_values = arr[active]
+    signs = np.sign(active_values)
+    if np.any(signs != signs[0]):
+        raise AssertionError(
+            "Mixed signs found in active source cells: "
+            f"min={np.min(active_values)}, max={np.max(active_values)}"
+        )
+    return {
+        "sign": float(signs[0]),
+        "min": float(np.min(arr)),
+        "max": float(np.max(arr)),
+        "sum": float(np.sum(arr)),
+        "active_cells": int(np.count_nonzero(active)),
+    }
+
+
+def _check_summed_source_signs(entries):
+    particle_signs = []
+    for field, species, values in entries:
+        if field != "particle":
+            continue
+        summary = _source_sign_summary(values)
+        particle_signs.append(summary["sign"])
+    if not particle_signs:
+        raise AssertionError("No particle sources found in summed source file")
+    if len(set(particle_signs)) != 1:
+        raise AssertionError(
+            f"Summed particle sources disagree in sign: {particle_signs}"
+        )
+
+
+def _check_written_summed_sources(filename, entries):
+    with Dataset(filename) as nc:
+        group = nc.groups["temperature_SUM"]
+        for field, species, expected in entries:
+            written = group.groups[species].variables[field][:]
+            np.testing.assert_allclose(written, expected)
 
 def kill_tree(pid):
     try:

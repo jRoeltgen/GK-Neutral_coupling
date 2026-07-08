@@ -8,7 +8,8 @@ from neutral_coupling.genex_coupling.genex_eirene_coupling import (interpolate_a
                                    prepare_genex_ion_temperatures,
                                    normalize_genex_params,
                                    backup_eirene_files,
-                                   next_eirene_index)
+                                   next_eirene_index,
+                                   source_filename)
 import numpy as np
 import xarray as xr
 from collections import defaultdict
@@ -554,6 +555,13 @@ def test_next_eirene_index_returns_next_after_highest_match(tmp_path):
 
 def test_next_eirene_index_returns_zero_without_matches(tmp_path):
     assert next_eirene_index(tmp_path, "input_sources") == 0
+
+
+def test_source_filepattern_trailing_underscore_is_normalized(tmp_path):
+    (tmp_path / "input_sources_000007.nc").touch()
+
+    assert source_filename("input_sources_", 8) == "input_sources_000008.nc"
+    assert next_eirene_index(tmp_path, "input_sources_") == 8
 
 
 # ----------------------------------------------------------------------

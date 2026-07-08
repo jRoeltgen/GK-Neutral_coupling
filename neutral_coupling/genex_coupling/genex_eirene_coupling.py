@@ -183,7 +183,7 @@ def main(args, deps=None):
             genex_electrons=genex_electrons,
         )
 
-        filename = args.filepattern + f"_{index:06d}" + ".nc"
+        filename = source_filename(args.filepattern, index)
         filename_tmp = filename + ".tmp"
         print(f"[{index}] Writing {filename_tmp}", flush=True)
         deps.write_nc(
@@ -415,6 +415,16 @@ def backup_eirene_files(eirene_path, index):
             if file_path.is_file():
                 shutil.move(str(file_path), dest_dir / file_path.name)
 
+def normalize_source_filepattern(filepattern):
+    """Return source file pattern without trailing index separators."""
+    return str(filepattern).rstrip("_")
+
+
+def source_filename(filepattern, index):
+    """Return the GENE-X source filename for a base pattern and index."""
+    return f"{normalize_source_filepattern(filepattern)}_{index:06d}.nc"
+
+
 def next_eirene_index(eirene_path, filepattern):
     """
     Scan files of the form:
@@ -425,6 +435,8 @@ def next_eirene_index(eirene_path, filepattern):
     """
 
     eirene_path = Path(eirene_path)
+
+    filepattern = normalize_source_filepattern(filepattern)
 
     # match: filepattern_000123.nc
     regex = re.compile(rf"^{re.escape(filepattern)}_(\d{{6}})\.nc$")

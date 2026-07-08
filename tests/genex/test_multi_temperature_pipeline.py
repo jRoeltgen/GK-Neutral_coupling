@@ -1,10 +1,15 @@
 from types import SimpleNamespace
+from pathlib import Path
+import sys
 
 from netCDF4 import Dataset
 import numpy as np
 import pytest
 
-from neutral_coupling.genex_coupling.examples.checked_run_eirene import (
+INTEGRATION_DIR = Path(__file__).resolve().parent / "integration"
+sys.path.insert(0, str(INTEGRATION_DIR))
+
+from imitation_eirene_checker import (
     COLLISION_TEMPERATURE_CONFIG,
     DEFAULT_TEMPERATURE_COLLISIONS,
     checked_collision_mappers,
@@ -19,7 +24,7 @@ from neutral_coupling.genex_coupling.genex_eirene_coupling import (
     interpolate_all_sources_wrapper,
     interpolate_temperature_values,
 )
-from neutral_coupling.genex_coupling.examples.fake_eirene_run import checked_write_nc
+from imitation_eirene_driver import checked_write_nc
 
 
 @pytest.mark.parametrize(

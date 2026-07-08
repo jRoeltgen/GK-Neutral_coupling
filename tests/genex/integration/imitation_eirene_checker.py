@@ -1,5 +1,6 @@
 import numpy as np
 from pathlib import Path
+import re
 from neutral_coupling.common.eirene_io import eirene
 from neutral_coupling.genex_coupling.eirene_interface import status
 from neutral_coupling.common import triangle_mesh as triangles
@@ -136,7 +137,20 @@ class CheckedRunEirene:
         self.history = []
         self.location_history = {}
         self.source_metadata = {}
-        self.counter = 1  # for oscillation
+        self.current_density_flat = None
+        self.pending_source_response = None
+        self.source_response_history = []
+        self.constant_magnitude = None
+        self.response_check_start = 2
+        self.response_check_number = 0
+        self.checked_delta_signs = []
+        self.checked_density_deltas = []
+        self.min_positive_support_cells = 3
+        self.min_positive_support_weight_fraction = 0.5
+        self.source_sign_buffer = 2
+        self.source_sign_blocks = (1, -1, 1, 1)
+        self.source_sign_block_length = None
+        self.source_index = 0
 
     def __call__(self, timeout, eirene_path, command=None):
         # --- Read current GENE-X state (what EIRENE would see) ---
@@ -161,6 +175,7 @@ class CheckedRunEirene:
 
         norm = np.linalg.norm(n)
         self.history.append(norm)
+        self.current_density_flat = np.asarray(n).reshape(-1).astype(float)
 
         if self.prev_norm is not None:
             # ensure density is evolving
@@ -168,6 +183,7 @@ class CheckedRunEirene:
                 raise AssertionError("GENE-X density is not evolving between iterations")
 
         self.prev_norm = norm
+        self._check_pending_source_response(self.current_density_flat)
 
         if self.mode == "multiple_temperatures":
             self._write_multiple_temperature_sources(
@@ -179,9 +195,9 @@ class CheckedRunEirene:
         R = self.edat.triangle_mesh.incenter[:,0]
         Z = self.edat.triangle_mesh.incenter[:,1]
 
-        self.counter *= -1
+        source_index = self.source_index
+        sign = self._summed_source_sign(source_index, eirene_path)
 
-        #R0, Z0 = 2.272, 0.0
         R0, Z0 = 2.26, 0.0
         sigmasq_z = 0.01
         sigmasq_r = 0.00003
@@ -189,10 +205,14 @@ class CheckedRunEirene:
 
         r_plasma = np.mean(b2dat.gmtry["crx"],axis=2)
         z_plasma = np.mean(b2dat.gmtry["cry"],axis=2)
-        dist = ((r_plasma - R0)**2 + (z_plasma - Z0)**2).ravel()
-        closest_idx = np.argmin(dist)
-        amplitude = n.ravel()[closest_idx]*10
-        print("Source amplitude=",amplitude)
+        plasma_dist = ((r_plasma - R0)**2 + (z_plasma - Z0)**2).ravel()
+        plasma_source_idx = np.argmin(plasma_dist)
+        source_density = float(n.ravel()[plasma_source_idx])
+        if self.constant_magnitude == None:
+            amplitude = source_density*10
+            self.constant_magnitude = amplitude
+        else:
+            amplitude = self.constant_magnitude
 
         gaussian = np.exp(
             -((R - R0)**2) / sigmasq_r
@@ -201,14 +221,20 @@ class CheckedRunEirene:
         gaussian /= np.max(gaussian)
 
         unit_conversion = elementary_charge/1e6
-        source = amplitude * gaussian * self.counter / dt
-        print("density=",np.max(n))
-        print("Gaussian max",np.max(np.abs(gaussian)))
-        print("counter=",self.counter)
-        print("dt=",dt)
-        print("source max amp (#/m^3s)",np.max(np.abs(source)))
+        source = amplitude * gaussian * sign / dt
         source *= unit_conversion
-        print("source max amp (amp/cm^3s)",np.max(np.abs(source)))
+        self._record_expected_source_response(
+            n,
+            r_plasma,
+            z_plasma,
+            R0,
+            Z0,
+            sigmasq_r,
+            sigmasq_z,
+            sign,
+            source_index,
+        )
+
         # --- Source sanity checks ---
         assert np.isfinite(source).all(), "NaNs in synthetic EIRENE source"
         assert not np.all(source == 0), "Zero source generated"
@@ -248,8 +274,272 @@ class CheckedRunEirene:
             parser.species["bulk_ions"][0],
             strata_values=strata_values,
         )
+        self.source_index += 1
 
         return status.SUCCESS
+
+    def _record_expected_source_response(
+        self,
+        density,
+        r_plasma,
+        z_plasma,
+        R0,
+        Z0,
+        sigmasq_r,
+        sigmasq_z,
+        source_sign,
+        source_index,
+    ):
+        density_flat = np.asarray(density, dtype=float).reshape(-1)
+        source_shape = np.exp(
+            -((np.asarray(r_plasma).reshape(-1) - R0) ** 2) / sigmasq_r
+            -((np.asarray(z_plasma).reshape(-1) - Z0) ** 2) / sigmasq_z
+        )
+        if source_shape.shape != density_flat.shape:
+            raise AssertionError(
+                "Source response check shape mismatch on EIRENE grid: "
+                f"source shape {source_shape.shape}, density shape "
+                f"{density_flat.shape}"
+            )
+        if not np.isfinite(source_shape).all():
+            raise AssertionError("Non-finite source footprint in response check")
+        if np.all(source_shape == 0):
+            raise AssertionError("Zero source footprint in response check")
+
+        support = source_shape >= 0.1 * np.max(source_shape)
+        if np.count_nonzero(support) < 3:
+            support = source_shape > 0
+        weights = np.zeros_like(source_shape, dtype=float)
+        weights[support] = source_shape[support]
+        weight_sum = np.sum(weights)
+        if weight_sum <= 0:
+            raise AssertionError("Empty source support in response check")
+        weights /= weight_sum
+        positive_density = density_flat > 0
+        positive_support = support & positive_density
+        positive_support_cells = int(np.count_nonzero(positive_support))
+        positive_support_weight_fraction = float(np.sum(weights[positive_density]))
+        if positive_support_cells < self.min_positive_support_cells:
+            raise AssertionError(
+                "Source response footprint does not overlap enough "
+                "positive-density plasma cells: "
+                f"{positive_support_cells} positive cells in support"
+            )
+        if (
+            positive_support_weight_fraction
+            < self.min_positive_support_weight_fraction
+        ):
+            raise AssertionError(
+                "Source response footprint is mostly outside positive-density "
+                "plasma cells: "
+                f"positive weight fraction={positive_support_weight_fraction}"
+            )
+
+        if source_sign == 0:
+            raise AssertionError("Ambiguous source sign in response check")
+
+        baseline_density = float(np.sum(density_flat * weights))
+        if baseline_density <= 0:
+            raise AssertionError(
+                "Source response baseline density is not positive: "
+                f"{baseline_density}"
+            )
+        self.pending_source_response = {
+            "label": f"source centered at R={R0}, Z={Z0}",
+            "source_index": int(source_index),
+            "R": float(R0),
+            "Z": float(Z0),
+            "weights": weights,
+            "sign": float(source_sign),
+            "baseline_density": baseline_density,
+            "support_cells": int(np.count_nonzero(support)),
+            "positive_support_cells": positive_support_cells,
+            "positive_support_weight_fraction": positive_support_weight_fraction,
+        }
+        print(
+            "recorded source response check:",
+            "source index=", source_index,
+            "label=", self.pending_source_response["label"],
+            "baseline=", baseline_density,
+            "source sign=", source_sign,
+            "support cells=", np.count_nonzero(support),
+            "positive support cells=", positive_support_cells,
+            "positive support weight fraction=",
+            positive_support_weight_fraction,
+            flush=True,
+        )
+
+    def _check_pending_source_response(self, density_flat):
+        if self.pending_source_response is None:
+            return
+
+        pending = self.pending_source_response
+        weights = pending["weights"]
+        current_density = float(np.sum(density_flat * weights))
+        previous_density = pending["baseline_density"]
+        density_delta = current_density - previous_density
+        expected_sign = pending["sign"]
+        scale = max(abs(current_density), abs(previous_density), 1.0)
+        tolerance = 1e-8 * scale
+        delta_sign = 0.0 if abs(density_delta) <= tolerance else float(np.sign(density_delta))
+        self.source_response_history.append(
+            {
+                "label": pending["label"],
+                "source_index": pending["source_index"],
+                "previous_density": previous_density,
+                "current_density": current_density,
+                "density_delta": density_delta,
+                "density_delta_sign": delta_sign,
+                "source_sign": expected_sign,
+                "support_cells": pending["support_cells"],
+            }
+        )
+        print(
+            "weighted density response:",
+            "source index=", pending["source_index"],
+            "label=", pending["label"],
+            "previous=", previous_density,
+            "current=", current_density,
+            "delta=", density_delta,
+            "delta sign=", delta_sign,
+            "source sign=", expected_sign,
+            "support cells=", pending["support_cells"],
+            flush=True,
+        )
+        self.pending_source_response = None
+        if self.response_check_number >= self.response_check_start:
+            assert abs(density_delta) > tolerance, (
+                "GENE-X density did not measurably respond over the source "
+                "footprint. "
+                f"Source={pending['label']}, previous density={previous_density}, "
+                f"current density={current_density}, delta={density_delta}, "
+                f"source sign={expected_sign}, "
+                f"support cells={pending['support_cells']}"
+            )
+            self.checked_delta_signs.append(delta_sign)
+            self.checked_density_deltas.append(density_delta)
+        self.response_check_number += 1
+
+    def assert_summed_source_updates_used(self, eirene_path=None):
+        if self.mode != "summed":
+            return
+
+        if len(self.checked_delta_signs) < 2:
+            raise AssertionError(
+                "Not enough checked density responses to verify source updates: "
+                f"{self.checked_delta_signs}"
+            )
+
+        sign_changes = sum(
+            current != previous
+            for previous, current in zip(
+                self.checked_delta_signs[:-1],
+                self.checked_delta_signs[1:],
+            )
+        )
+        theoretical_updates = self._theoretical_source_updates(eirene_path)
+        minimum_sign_changes = self._minimum_required_delta_sign_changes(
+            theoretical_updates
+        )
+        print(
+            "summed source response sign-change summary:",
+            "checked signs=", self.checked_delta_signs,
+            "sign changes=", sign_changes,
+            "theoretical source updates=", theoretical_updates,
+            "minimum required sign changes=", minimum_sign_changes,
+            flush=True,
+        )
+        assert sign_changes >= minimum_sign_changes, (
+            "GENE-X density response did not show enough sign changes for the "
+            "block-sign source updates. "
+            f"checked signs={self.checked_delta_signs}, "
+            f"deltas={self.checked_density_deltas}, "
+            f"sign changes={sign_changes}, "
+            f"theoretical source updates={theoretical_updates}, "
+            f"minimum required sign changes={minimum_sign_changes}"
+        )
+
+    def _minimum_required_delta_sign_changes(self, theoretical_updates):
+        return 2
+
+    def _summed_source_sign(self, source_index, eirene_path):
+        block_length = self._summed_source_sign_block_length(eirene_path)
+        if source_index < self.source_sign_buffer:
+            return 1
+
+        block_index = (source_index - self.source_sign_buffer) // block_length
+        block_index = min(block_index, len(self.source_sign_blocks) - 1)
+        return self.source_sign_blocks[block_index]
+
+    def _summed_source_sign_block_length(self, eirene_path):
+        if self.source_sign_block_length is not None:
+            return self.source_sign_block_length
+
+        theoretical_updates = self._theoretical_source_updates(eirene_path)
+        if theoretical_updates is None:
+            block_length = 3
+        else:
+            block_length = int(
+                (theoretical_updates - self.source_sign_buffer)
+                / len(self.source_sign_blocks)
+            )
+            block_length = max(1, block_length)
+
+        self.source_sign_block_length = block_length
+        print(
+            "summed source sign pattern:",
+            "initial positive buffer=", self.source_sign_buffer,
+            "source sign blocks=", self.source_sign_blocks,
+            "block length=", block_length,
+            "theoretical source updates=", theoretical_updates,
+            flush=True,
+        )
+        return block_length
+
+    def _theoretical_source_updates(self, eirene_path):
+        params = self._read_minimal_genex_params(eirene_path)
+        if params is None:
+            return None
+
+        dt = params.get("dt")
+        n_timesteps = params.get("n_timesteps")
+        update_delta_t = params.get("update_delta_t")
+        if dt is None or n_timesteps is None or update_delta_t is None:
+            return None
+        if update_delta_t <= 0:
+            return None
+        return dt * n_timesteps / update_delta_t
+
+    def _read_minimal_genex_params(self, eirene_path):
+        if eirene_path is None:
+            return None
+
+        eirene_path = Path(eirene_path)
+        candidates = [
+            eirene_path / "params_summed_temp.txt",
+            eirene_path / "params_in.txt",
+        ]
+        for path in candidates:
+            if path.exists():
+                return self._parse_minimal_genex_params(path)
+        return None
+
+    def _parse_minimal_genex_params(self, path):
+        params = {}
+        pattern = re.compile(
+            r"^\s*(dt|n_timesteps|update_delta_t)\s*=\s*([^!\s]+)"
+        )
+        for line in Path(path).read_text().splitlines():
+            match = pattern.match(line)
+            if not match:
+                continue
+            key, value = match.groups()
+            value = value.replace("D", "e").replace("d", "e")
+            if key == "n_timesteps":
+                params[key] = int(float(value))
+            else:
+                params[key] = float(value)
+        return params
 
     def _write_multiple_temperature_sources(self, eirene_path, b2dat, density):
         R = self.edat.triangle_mesh.incenter[:, 0]
@@ -313,7 +603,15 @@ class CheckedRunEirene:
             Z,
         )
 
-        self.counter *= -1
+        selected_forts = {
+            COLLISION_TEMPERATURE_CONFIG[collision]["fort"]
+            for collision in self.collision_types
+        }
+        for config in COLLISION_TEMPERATURE_CONFIG.values():
+            if config["fort"] not in selected_forts:
+                (eirene_path / config["fort"]).unlink(missing_ok=True)
+
+        source_sign = 1.0
         unit_conversion = elementary_charge / 1e6
         dt = 1e-7
 
@@ -331,7 +629,7 @@ class CheckedRunEirene:
             local_density = density_flat[plasma_index]
             amplitude = local_density * (index + 1) * 10.0
             source = (
-                amplitude * gaussian * self.counter / dt * unit_conversion
+                amplitude * gaussian * source_sign / dt * unit_conversion
             )
             assert np.isfinite(source).all()
             assert np.any(source != 0)
