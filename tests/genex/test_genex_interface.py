@@ -57,14 +57,6 @@ def fake_species():
         species("D", +1),   # ion
     ]
 
-@pytest.fixture(autouse=True)
-def clear_load_latest_ref_mask():
-    if hasattr(load_latest_genex_fields, "ref_mask"):
-        delattr(load_latest_genex_fields, "ref_mask")
-    yield
-    if hasattr(load_latest_genex_fields, "ref_mask"):
-        delattr(load_latest_genex_fields, "ref_mask")
-
 @pytest.fixture
 def mocked_io():
     with patch("neutral_coupling.genex_coupling.genex_interface.filepath_resolver") as mock_resolver, \
@@ -379,19 +371,16 @@ def test_load_latest_genex_fields_uses_requested_stable_time_index(
         assert time == tau[1]
         assert set(out["n"]) == {"e", "D"}
 
-@patch("neutral_coupling.genex_coupling.genex_interface._diagnostic_print")
 @patch("neutral_coupling.genex_coupling.genex_interface.wait_until_genex_stable")
 @patch("neutral_coupling.genex_coupling.genex_interface.load_snaps_genex")
-def test_load_latest_genex_fields_zero_mask_change_raises(
+def test_load_latest_genex_fields_allows_zero_mask_changes(
     mock_load,
     mock_wait,
-    mock_diagnostic,
     fake_grid,
     fake_norm,
     fake_species,
 ):
     tau = np.array([0.0, 1.0])
-    load_latest_genex_fields.ref_mask = np.zeros((3, 4), dtype=bool)
     mock_wait.return_value = tau
 
     def fake_loader(path, spec, field):
@@ -410,22 +399,52 @@ def test_load_latest_genex_fields_zero_mask_change_raises(
     with (
         patch("neutral_coupling.genex_coupling.genex_interface.electric_field", return_value="efield"),
         patch("neutral_coupling.genex_coupling.genex_interface.velocities_m") as mock_vel,
+        patch("neutral_coupling.genex_coupling.genex_interface.electrostatic_ExB_heat_flux") as mock_q,
+        patch("neutral_coupling.genex_coupling.genex_interface.calculate_temperatures") as mock_calc_temp,
+        patch("neutral_coupling.genex_coupling.genex_interface.total_pressure") as mock_total_pressure,
     ):
         mock_vel.ExB_velocity.return_value = 1.0
+        mock_vel.diamagnetic_velocity.return_value = 2.0
+        mock_total_pressure.return_value = MagicMock(
+            values=np.ones((3, 4))
+        )
+        mock_vel.parallel_ion_velocity_vector.return_value = xr.DataArray(
+            np.ones((3, 3, 4)),
+            dims=("vector", "RZ", "phi"),
+            coords={
+                "vector": ["eR", "ePhi", "eZ"],
+                "RZ": [0, 1, 2],
+                "phi": [0, 1, 2, 3],
+            },
+        )
+        mock_q.return_value = xr.DataArray(
+            np.ones((3, 4)),
+            dims=("RZ", "phi"),
+            coords={"RZ": np.arange(3), "phi": np.arange(4)},
+        )
+        mock_calc_temp.return_value = (
+            xr.DataArray(
+                np.ones((3, 4)),
+                dims=("RZ", "phi"),
+                coords={"RZ": np.arange(3), "phi": np.arange(4)},
+            ),
+            None,
+            None,
+        )
 
-        with pytest.raises(ValueError, match="Zero mask changed"):
-            load_latest_genex_fields(
-                gpath=Path("path"),
-                all_spec=fake_species,
-                grid=fake_grid,
-                equi="equi",
-                params="params",
-                norm=fake_norm,
-                time_index=-1,
-                timeout=1,
-            )
+        out, time = load_latest_genex_fields(
+            gpath=Path("path"),
+            all_spec=fake_species,
+            grid=fake_grid,
+            equi="equi",
+            params="params",
+            norm=fake_norm,
+            time_index=-1,
+            timeout=1,
+        )
 
-    mock_diagnostic.assert_called_once()
+    assert time == tau[-1]
+    assert set(out["n"]) == {"e", "D"}
 
 def test_retry_compute_returns_immediately_on_success():
     fn = MagicMock(return_value="done")

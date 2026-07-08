@@ -159,18 +159,7 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
 
         for s in spec:
             n = retry_compute(lambda: load_field("n", s, norm.n0).load())
-            density_tol = 1e-12 * float(np.nanmax(np.abs(n)))
-            zero_mask = (n < density_tol)
-            if not hasattr(load_latest_genex_fields, "ref_mask"):
-                ref_mask = zero_mask.values
-                load_latest_genex_fields.ref_mask = ref_mask
-            else:
-                old_mask = load_latest_genex_fields.ref_mask
-                new_mask = zero_mask.values
-                if not np.array_equal(old_mask, new_mask):
-                    _diagnostic_print(old_mask, new_mask)
-                    raise ValueError("Zero mask changed over time")
-
+            _validate_loaded_density(n, s)
             set_field("n", s, n.where(n > 0))
             load_field("u_par", s, norm.c_s0)
             # Check that these normalization temps are correct
@@ -197,7 +186,6 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                                                 get_field("E_perp",s)))
             set_field("fnay", s, get_field("n", s))
             set_field("fnax", s, get_field("n", s))
-        print("calc pressure")
         set_field("pr", NO_SPECIES, total_pressure(get_field("n",electrons[0]),
                                         get_field("Ttot", electrons[0]),
                                         get_field("Ttot", ions[0]), norm))
@@ -313,39 +301,17 @@ def retry_compute(fn, attempts=3, delay=0.5):
             raise
     raise RuntimeError("Repeated HDF errors")
 
-def _diagnostic_print(old_mask, new_mask):
-    old_n = int(old_mask.sum())
-    new_n = int(new_mask.sum())
-    print(
-        "Zero count old/new:",
-        old_n, new_n,
-        "delta:", new_n - old_n,
-        flush=True
-    )
-
-    changed = old_mask != new_mask
-    n_changed = int(changed.sum())
-    print("Cells whose zero-status changed:", n_changed, flush=True)
-
-    became_zero = (~old_mask) & new_mask
-    left_zero   = old_mask & (~new_mask)
-
-    print("Newly zero cells:", int(became_zero.sum()), flush=True)
-    print("No longer zero:", int(left_zero.sum()), flush=True)
-
-    # axis 0 = phi, axis 1 = points
-    print("Changed by phi:", flush=True)
-    print(changed.sum(axis=1), flush=True)
-
-    # Number of spatial points that changed in any phi plane
-    rz_changes = changed.sum(axis=0)
-    print(
-        "RZ points changed in any phi:",
-        int((rz_changes > 0).sum()),
-        flush=True
-    )
-
-    # First few changed indices
-    inds = np.argwhere(changed)
-    print("First changed indices [phi, point]:", flush=True)
-    print(inds[:20], flush=True)
+def _validate_loaded_density(density, species):
+    values = np.asarray(density)
+    if values.size == 0:
+        raise ValueError(f"Empty density field loaded for species {species}")
+    if not np.isfinite(values).any():
+        raise ValueError(
+            f"Density field loaded for species {species} contains no finite "
+            "values"
+        )
+    if not np.any(values > 0):
+        raise ValueError(
+            f"Density field loaded for species {species} contains no positive "
+            "values"
+        )
