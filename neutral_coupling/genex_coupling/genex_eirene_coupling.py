@@ -45,9 +45,30 @@ def main(args, deps=None):
                 default_single_species_pseudo_temperature_handler
             ),
         )
+    """
+        Main driver for GENE-X/Eirene coupling.
+        It is meant to run simultaneously with a GENE-X run to include
+        Eirene neutrals.
+
+        args - command line arguments. Run with --help to print or see at the
+            bottom of this file
+
+        deps - Functional dependencies, primarily to allow replacements during
+            testing. However, several of special note allowing change in
+            functionality, are:
+            collision_mappers - How to map Eirene sources to the different
+                species' temperatures. If none is selected, a default for a pure
+                D+ simulation is selected.
+            sparse_temperature_handler - How to handle cells where the
+                temperature is 0 for groupling sources by temperature. Default
+                is for a case with pure D+.
+            pseudo_temperature_handler - How to handle the temperature
+                of pseudo species. Default is for a case with pure D+.
+    """
     dask.config.set(scheduler="synchronous")
     eirene_path = Path(args.eirene_path)
     genex_path = Path(args.genex_path)
+    # Load static in time data
     edat, b2dat, pol_mask, rad_mask = eirene_interface(eirene_path, eirene_path)
     grid, equi, params, norm, r_all, z_all, compute = genex_interface.wait_for_genex_init(genex_path)
     params = normalize_genex_params(params)
@@ -55,7 +76,7 @@ def main(args, deps=None):
     genex_electrons = get_genex_electron_name(genex_species)
     check_species_consistency(edat.species_names["bulk_ions"], genex_species)
     grid_r = np.asarray(r_all*norm["R0"])
-    # Need to change this negative to function of grid._flipped_z and equi._flipped_Z
+    # TODO: Need to change this negative to function of grid._flipped_z and equi._flipped_Z
     grid_z = np.asarray(z_all*norm["R0"])
     if params["params_time_loop"]["start_from_checkpoint"]:
         index = next_eirene_index(eirene_path, args.filepattern)
@@ -71,9 +92,8 @@ def main(args, deps=None):
     # Precompute triangulation
     tri = build_triangulation(grid_r[compute], grid_z[compute])
     timeout = 600
+    # Main loop - runs for duration of GENE-X
     while deps.pid_exists(args.pid):
-        #gc.collect()
-
         for attempt in range(3):
             try:
                 genex_fields, tau = genex_interface.load_latest_genex_fields(
@@ -96,6 +116,7 @@ def main(args, deps=None):
         genex_fields_2D = genex_interface.toroidal_avg(genex_fields)
         ion_temperature_values = {}
         if not args.SumTemp:
+            # Prepare GENE-X ion temperatures for use as source temperature
             ion_temperature_values = prepare_genex_ion_temperatures(
                 genex_fields_2D,
                 genex_species,
@@ -129,6 +150,7 @@ def main(args, deps=None):
                 else:
                     print(f"Eirene timed out {num_timeouts} time. Terminating GENE-X")
                     # Will a GENE-X checkpoint be written if this is done?
+                    # TODO: There is a GENE-X soft kill to allow checkpoint
                     deps.killpg(args.pid, SIGTERM)
                     raise RuntimeError("EIRENE timed out more than max timeouts")
             elif eirene_status == status.ERROR:
@@ -148,7 +170,7 @@ def main(args, deps=None):
                 }
                 for mom, species_dict in edat.sources.items()
             }
-        else:
+        else: # Split sources by temperature
             temps = get_temperatures(
                 edat,
                 eirene_path,
@@ -208,6 +230,7 @@ def get_genex_electron_name(genex_species):
             return sp.name
 
 def check_species_consistency(eirene_species, genex_species):
+    """ Ensure GENE-X and Eirene species are consistent """
     for sp in genex_species:
         if (sp.name not in eirene_species and not sp.is_electron):
             raise ValueError(f"Genex Species {sp.name} not known to Eirene. "
@@ -215,10 +238,10 @@ def check_species_consistency(eirene_species, genex_species):
                              f"{' ,'.join(eirene_species)}.")
 
 def unnormalize_all(genex_out):
+    """ Convert GENE-X data to SI"""
     for field, field_block in genex_out.items():
         for species, value in field_block.items():
             genex_out[field][species] = genex_interface.unnormalize(value)
-
 
 def prepare_genex_ion_temperatures(
     genex_fields_2D,
@@ -228,7 +251,8 @@ def prepare_genex_ion_temperatures(
     compute,
     sparse_temperature_handler,
 ):
-    """Nearest-fill GENE-X ion temperatures from any usable samples."""
+    """Prepare GENE-X ion temperature to be used as source temperature.
+    Nearest-fill GENE-X ion temperatures from any usable samples."""
     points = np.column_stack([grid_r[compute], grid_z[compute]])
     temperatures = {}
 
@@ -260,6 +284,7 @@ def prepare_genex_ion_temperatures(
     return temperatures
 
 def interpolate_all_moments(gmtry, tri, genex_out, radial_mask, poloidal_mask):
+    """ Interpolate GENE-X data onto plasma grid used by Eirene"""
     out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     flattened = []
     keys = []
@@ -289,6 +314,7 @@ def interpolate_all_moments(gmtry, tri, genex_out, radial_mask, poloidal_mask):
     return out
 
 def normalize_genex_params(params):
+    """ Strip whitespace from parameter keys"""
     ps = params.get("params_species", {})
     if "names" in ps:
         ps["names"] = [n.strip() for n in ps["names"]]
@@ -349,7 +375,6 @@ def interpolate_all_sources_wrapper(
 
     return out
 
-
 def interpolate_temperature_values(
     tria,
     temperature_values,
@@ -395,6 +420,7 @@ def interpolate_temperature_values(
     return out
 
 def backup_eirene_files(eirene_path, index):
+    """ Backup a single iteration's eirene files """
     # Create directory name like eirene_sources_000000
     dest_dir = eirene_path / Path(f"eirene_sources_{index:06d}")
     dest_dir.mkdir(exist_ok=True)
@@ -475,7 +501,8 @@ def cli():
     parser.add_argument("--eirene_time", type=int, default=200,
                         help="Number of seconds to allow Eirene to run.")
     parser.add_argument("--solpstop", type=str, default=default_stop,
-                        help="To be written. For reaction paths.")
+                        help="Path to top of solps directory tree as expected "
+                        "by Eirene. For reaction paths.")
     parser.add_argument("--genex_time_index_override", type=bool, default=False,
                         help="Internal/testing only. Overrides GENE-X time selection. "
                             "Default (False) selects latest time slice. "

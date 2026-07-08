@@ -55,6 +55,7 @@ def eirene_interface(eirene_path, b2_path):
 
     return edat, b2dat, pol_mask, rad_mask
 
+"""Mapping between different naming schemes"""
 TEMPERATURE_CLASS_INFO = {
     "a": ("atoms", "atom labels", "Tn", "ATOMS"),
     "m": ("molecules", "molecule labels", "Tm", "MOLECULES"),
@@ -177,6 +178,7 @@ def get_temperatures(
     return temperatures
 
 def prepare_fort31(edat, genex_data, eorder, iorder):
+    """Fill fort31 dictionary with gene-x data"""
     # vExB = ExB_velocity() see analyze_moments.py
     upar = dict_to_array(genex_data["u_par"], iorder, edat.fort31["ua"].shape)
     nions = len(iorder)
@@ -214,6 +216,7 @@ def prepare_fort31(edat, genex_data, eorder, iorder):
     edat.fort31["fhex"] = qepar * edat.fort31["bb"][:,:,0] # Poloidal electron heat flux
     # Radial electron heat flux
 
+"""Make sure array is correct shape for fort.31"""
 def dict_to_array(dict_in, order, dim=None):
     if not order:
         return next(iter(dict_in.values()))
@@ -228,6 +231,7 @@ def dict_to_array(dict_in, order, dim=None):
             f"Dimensions of new fort.31 field {arr.shape} don't match original: {dim}")
     return arr
 
+"""Wrapper for running Eirene"""
 def run_eirene(Eirene_time, eirene_path, command="eirobjx", solpstop=""):
     output_file = eirene_path / Path("run.log")
     try:

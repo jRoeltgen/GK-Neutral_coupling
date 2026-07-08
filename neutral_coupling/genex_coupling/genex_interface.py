@@ -18,6 +18,9 @@ from torx.measure import (
 )
 
 def wait_for_genex_init(genex_path, timeout=300, poll=3):
+    """Attempt to read GENE-X initialization files. Attempts repeatly over
+        a period of time, in case they are not there to begin with
+    """
     import time
     t0 = time.time()
     last_err = None
@@ -256,6 +259,7 @@ def wait_until_genex_stable(
     stable_time=2.0,
     timeout=300.0,
 ):
+    """Wait until mom_2D file is stable so it can be opened cleanly"""
     start = time.time()
 
     last_tau = None

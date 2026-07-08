@@ -36,6 +36,22 @@ def test_full_coupling(
     genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test",
     eirene_path = None,
 ):
+    """
+    Test of full coupling with analytic replacement of Eirene. Checks that files
+    are passed correctly and GENE-X data is loaded correctly. If
+    temperature_mode="summed", checks that the sources are updated over time.
+    If temperature_mode="multiple_temperatures", checks that the multiple
+    temperatures are loaded into GENE-X (by change in density).
+
+    tmp_path - Where the sources are written to
+    override - If true, overrides selection of time slice in GENE-X data. True
+            selects a monotonically increasing time slice starting at 1, so
+            GENE-X can be replaced with an already created set of data.
+    temperature_mode - Whether to sum sources or split by temperature
+    collision_types - Which Eirene collision types to use (i.e. atom-plasma)
+    genex_path - Full path directory with GENE-X run data
+    eirene_path - Full path to directory with eirene input files.
+    """
     from types import SimpleNamespace
     print("=== PYTHON ENTRY REACHED ===", flush=True)
     pid = int(Path("genex.pid").read_text())
