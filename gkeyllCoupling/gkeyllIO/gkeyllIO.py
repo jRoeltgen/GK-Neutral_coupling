@@ -258,14 +258,24 @@ class gkeyll:
                         if os.path.exists(bflux_file):
                             mdata = pg.GData(bflux_file)
                             coeffs = mdata.get_values()
-                            mom_data[species+'M1'+bdry] = mdata.get_values()[:,0:2]
 
-            #Correct the Flux based on bflux ratio
-            for species in self.species_list:
-                if isim in [0,1]:
-                    mom_data[species+"M1"][:,0,:] = mom_data[species+"M1"][:,0,:]*np.abs( (mom_data[species+"M1"+"ylower"][:,0] * 1/np.sqrt(2) ) / (mom_data[species+"M1"][:,0,0] * 1/2 ) )[:, np.newaxis]
-                if isim in [4,5]:
-                    mom_data[species+"M1"][:,-1,:] = mom_data[species+"M1"][:,-1,:]*np.abs( (mom_data[species+"M1"+"yupper"][:,0] * 1/np.sqrt(2) ) / (mom_data[species+"M1"][:,-1,0] * 1/2 ))[:, np.newaxis]
+                            lenrdata = pg.GData('%s-lenr_dir1.gkyl'%sim_name).get_values()
+                            bimpactangledata = pg.GData('%s-bimpactangle_dir1.gkyl'%sim_name).get_values()
+                            if bdry == "ylower":
+                                lenrdata = lenrdata[:, 0, 0]/np.sqrt(2)
+                                bimpactangledata = bimpactangledata[:, 0, 0]/np.sqrt(2)
+                            if bdry == "yupper":
+                                lenrdata = lenrdata[:, -1, 0]/np.sqrt(2)
+                                bimpactangledata = bimpactangledata[:, -1, 0]/np.sqrt(2)
+                            #Factor of 2 is because of some error
+                            mom_data[species+'M1'+bdry] = mdata.get_values()[:,0]/np.sqrt(2)/lenrdata/2/np.sin(bimpactangledata)
+
+            ##Correct the Flux based on bflux ratio
+            #for species in self.species_list:
+            #    if isim in [0,1]:
+            #        mom_data[species+"M1"][:,0,:] = mom_data[species+"M1"][:,0,:]*np.abs( (mom_data[species+"M1"+"ylower"] ) / (mom_data[species+"M1"][:,0,0] * 1/2 ) )[:, np.newaxis]
+            #    if isim in [4,5]:
+            #        mom_data[species+"M1"][:,-1,:] = mom_data[species+"M1"][:,-1,:]*np.abs( (mom_data[species+"M1"+"yupper"] ) / (mom_data[species+"M1"][:,-1,0] * 1/2 ))[:, np.newaxis]
 
             # Load the potential
             mdata = pg.GData('%s-field_%d.gkyl'%(sim_name, frame))
