@@ -15,3 +15,10 @@ Within the gkeyllCoupling folder are three subfolders:
     1. gkeyllGeometry: Contains files used to generate mappings to interpolate data between Gkeyll and EIRENE
     2. gkeyllIO: Contains files used to pass plasma data from Gkeyll to EIRENE and neutral/plasma source data from EIRENE to Gkeyll
     3. gkeyllExamples: Contains some example uses of the files in gkeyllGeometry and gkeyllIO 
+
+
+
+# Dependencies
+For All Coupling : numpy, scipy, filecmp, colorama, hypothesis
+
+Additionally For Gkeyll Coupling : postgkyl

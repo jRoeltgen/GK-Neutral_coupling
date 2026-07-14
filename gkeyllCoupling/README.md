@@ -24,4 +24,6 @@ Within the gkeyllCoupling folder are three subfolders:
 
         - gkeyllExamples/PrepEireneData.py is called by coupling_script.sh. It processes the Eirene output and prepares the Gkeyll input data
 
+        - gkeyllExamples/gendummyft31.py: Depending on how you have eirene installed you may be able to generate a fort.31 starting file with SOLPS. Otherwise use this file
+
 
