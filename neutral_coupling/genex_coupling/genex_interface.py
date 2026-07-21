@@ -182,7 +182,16 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                                                             component="radial")
             set_field("u_phi", s, grid.matrix_to_vector(uvec.sel(vector='ePhi')))
 
-            set_field("u_rad", s, radial_vExB + radial_vDia)
+            target_norm = norm.c_s0.to("m/s")
+            exb_norm = radial_vExB.attrs["norm"].to("m/s")
+            dia_norm = radial_vDia.attrs["norm"].to("m/s")
+            u_rad = (
+                radial_vExB * (exb_norm / target_norm).magnitude
+                + radial_vDia * (dia_norm / target_norm).magnitude
+            )
+            u_rad.attrs["norm"] = target_norm
+            set_field("u_rad", s, u_rad)
+
             set_field("q_es", s, electrostatic_ExB_heat_flux(grid, equi, norm,
                                                 get_field("es_pot", NO_SPECIES),
                                                 get_field("E_par",s),
