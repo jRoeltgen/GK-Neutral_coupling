@@ -34,6 +34,7 @@ else
     echo "Submit from tests/genex/integration or set INTEGRATION_DIR." >&2
     exit 1
 fi
+cp "$SCRIPT_DIR/input_files/fort.31.template" "$SCRIPT_DIR/input_files/fort.31"
 cd "$SCRIPT_DIR/input_files" || exit 1
 export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
