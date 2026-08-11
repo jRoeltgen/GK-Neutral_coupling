@@ -15,7 +15,7 @@ from neutral_coupling.common import source_post_processor as SPP
 from .write_netcdf import write_sources_nc
 from os import (killpg, replace)
 from signal import SIGTERM
-from time import sleep
+from time import (sleep, perf_counter)
 from types import SimpleNamespace
 import numpy as np
 import dask
@@ -92,6 +92,7 @@ def main(args, deps=None):
     # Precompute triangulation
     tri = build_triangulation(grid_r[compute], grid_z[compute])
     timeout = 600
+    last_tau_advance = perf_counter()
     # Main loop - runs for duration of GENE-X
     while deps.pid_exists(args.pid):
         for attempt in range(3):
@@ -110,6 +111,10 @@ def main(args, deps=None):
 
         timeout = 300
         if (tau <= last_tau):
+            if (perf_counter()-last_tau_advance > timeout*3):
+                raise RuntimeError(f"GENE-X does not appear to be advancing."
+                                   f"Diagnostics have been at t={tau} for more"
+                                   f"than {timeout*3} seconds.")
             deps.sleep(5)
             continue
         unnormalize_all(genex_fields)
@@ -219,6 +224,7 @@ def main(args, deps=None):
         backup_eirene_files(eirene_path, index)
         index += 1
         last_tau = tau
+        last_tau_advance = perf_counter()
         if args.genex_time_index_override:
             time_index += 1
             if ntau<time_index:
