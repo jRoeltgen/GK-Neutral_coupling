@@ -1,8 +1,10 @@
 from collections import defaultdict
 from pathlib import Path
+import random
 import numpy as np
 import time
 import xarray as xr
+import dask
 from torx.specializations.genex import (
     initialize_genex_from_filepath,
     load_snaps_genex,
@@ -91,10 +93,63 @@ class species:
         self.is_electron = charge<0
 
 def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
-                             time_index, timeout):
+                             time_index, timeout, read_mode="averaged",
+                             read_attempts=6, retry_delay=0.5,
+                             retry_max_delay=10.0):
     """
-    Load latest GENE-X data and compute derived quantities.
+    Load and toroidally average the latest GENE-X data.
+
+    A complete attempt includes opening the diagnostic, constructing derived
+    quantities, and materializing the averaged result.  Retrying this whole
+    operation is important: an HDF failure can leave lazy arrays holding stale
+    file handles which must not be reused.
     """
+    if read_mode not in {"averaged", "full"}:
+        raise ValueError(
+            f"Unknown GENE-X read mode {read_mode!r}; expected 'averaged' "
+            "or 'full'"
+        )
+    if read_attempts < 1:
+        raise ValueError("read_attempts must be at least one")
+    if retry_delay < 0 or retry_max_delay < 0:
+        raise ValueError("GENE-X retry delays cannot be negative")
+
+    delay = retry_delay
+    last_error = None
+    for attempt in range(1, read_attempts + 1):
+        try:
+            return _load_latest_genex_fields_once(
+                gpath, all_spec, grid, equi, params, norm, time_index,
+                timeout, read_mode,
+            )
+        except (RuntimeError, OSError) as error:
+            if not is_hdf_error(error):
+                raise
+            last_error = error
+            if attempt == read_attempts:
+                break
+            sleep_for = min(delay, retry_max_delay)
+            if sleep_for > 0:
+                sleep_for *= random.uniform(0.8, 1.2)
+            print(
+                f"Transient NetCDF/HDF error during GENE-X {read_mode} "
+                f"read (attempt {attempt}/{read_attempts}); reopening after "
+                f"{sleep_for:.2f} s: {error}",
+                flush=True,
+            )
+            time.sleep(sleep_for)
+            delay = min(max(delay * 2, retry_delay), retry_max_delay)
+
+    raise RuntimeError(
+        f"GENE-X {read_mode} read failed after {read_attempts} attempts due "
+        f"to repeated NetCDF/HDF errors: {last_error}"
+    ) from last_error
+
+
+def _load_latest_genex_fields_once(gpath, all_spec, grid, equi, params, norm,
+                                   time_index, timeout, read_mode):
+    """Perform one fresh GENE-X open/derive/average/materialize attempt."""
+    opened = []
     with xr.set_options(file_cache_maxsize=1):
         spec = []
         electrons = []
@@ -134,6 +189,9 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
         def load_field(field_name, species, norm_value):
             da = load_snaps_genex(gpath, species, field_name).isel({"tau": time_index})
             da.attrs["norm"] = norm_value
+            opened.append(da)
+            if read_mode == "full":
+                da.load()
             if species is None:
                 set_field(field_name, NO_SPECIES, da)
             else:
@@ -154,55 +212,64 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
             raise ValueError(f"time_index {time_index} not less than or equal "
                         f"to last stable index found ({stable_idx})")
 
-        load_field("es_pot", None, (norm.Te0 / norm.elementary_charge).to("V"))
-        efield = electric_field(grid, get_field("es_pot", NO_SPECIES))
+        try:
+            load_field("es_pot", None, (norm.Te0 / norm.elementary_charge).to("V"))
+            efield = electric_field(grid, get_field("es_pot", NO_SPECIES))
 
-        radial_vExB = velocities_m.ExB_velocity(efield, grid=grid, equi=equi,
-                                                norm=norm, component="radial")
+            radial_vExB = velocities_m.ExB_velocity(efield, grid=grid, equi=equi,
+                                                    norm=norm, component="radial")
 
-        for s in spec:
-            n = retry_compute(lambda: load_field("n", s, norm.n0).load())
-            _validate_loaded_density(n, s)
-            set_field("n", s, n.where(n > 0))
-            load_field("u_par", s, norm.c_s0)
-            # Check that these normalization temps are correct
-            load_field("E_par", s, norm.Te0 * norm.n0)
-            load_field("E_perp", s, norm.Te0 * norm.n0)
-            load_field("Q_par", s, norm.Ti0 * norm.n0 * norm.c_s0)
-            load_field("Q_perp", s, norm.Ti0 * norm.n0 * norm.c_s0)
-            set_field("Ttot",s, calculate_temperatures(params, norm, s,
-                                    get_field("n",s), get_field("u_par",s),
-                                    get_field("E_par",s), get_field("E_perp",s))[0])
+            for s in spec:
+                n = load_field("n", s, norm.n0)
+                # Density validation is part of the protected transaction.
+                n.load()
+                _validate_loaded_density(n, s)
+                set_field("n", s, n.where(n > 0))
+                load_field("u_par", s, norm.c_s0)
+                # Check that these normalization temps are correct
+                load_field("E_par", s, norm.Te0 * norm.n0)
+                load_field("E_perp", s, norm.Te0 * norm.n0)
+                load_field("Q_par", s, norm.Ti0 * norm.n0 * norm.c_s0)
+                load_field("Q_perp", s, norm.Ti0 * norm.n0 * norm.c_s0)
+                set_field("Ttot",s, calculate_temperatures(params, norm, s,
+                                        get_field("n",s), get_field("u_par",s),
+                                        get_field("E_par",s), get_field("E_perp",s))[0])
 
-            upar = grid.vector_to_matrix(get_field("u_par",s))
-            uvec = velocities_m.parallel_ion_velocity_vector(grid, equi, upar)
-            radial_vDia = velocities_m.diamagnetic_velocity(get_field("Ttot", s),
-                                                            grid=grid, equi=equi,
-                                                            norm=norm, spec=s,
-                                                            component="radial")
-            set_field("u_phi", s, grid.matrix_to_vector(uvec.sel(vector='ePhi')))
+                upar = grid.vector_to_matrix(get_field("u_par",s))
+                uvec = velocities_m.parallel_ion_velocity_vector(grid, equi, upar)
+                radial_vDia = velocities_m.diamagnetic_velocity(get_field("Ttot", s),
+                                                                grid=grid, equi=equi,
+                                                                norm=norm, spec=s,
+                                                                component="radial")
+                set_field("u_phi", s, grid.matrix_to_vector(uvec.sel(vector='ePhi')))
 
-            target_norm = norm.c_s0.to("m/s")
-            exb_norm = radial_vExB.attrs["norm"].to("m/s")
-            dia_norm = radial_vDia.attrs["norm"].to("m/s")
-            u_rad = (
-                radial_vExB * (exb_norm / target_norm).magnitude
-                + radial_vDia * (dia_norm / target_norm).magnitude
-            )
-            u_rad.attrs["norm"] = target_norm
-            set_field("u_rad", s, u_rad)
+                target_norm = norm.c_s0.to("m/s")
+                exb_norm = radial_vExB.attrs["norm"].to("m/s")
+                dia_norm = radial_vDia.attrs["norm"].to("m/s")
+                u_rad = (
+                    radial_vExB * (exb_norm / target_norm).magnitude
+                    + radial_vDia * (dia_norm / target_norm).magnitude
+                )
+                u_rad.attrs["norm"] = target_norm
+                set_field("u_rad", s, u_rad)
 
-            set_field("q_es", s, electrostatic_ExB_heat_flux(grid, equi, norm,
-                                                get_field("es_pot", NO_SPECIES),
-                                                get_field("E_par",s),
-                                                get_field("E_perp",s)))
-            set_field("fnay", s, get_field("n", s))
-            set_field("fnax", s, get_field("n", s))
-        set_field("pr", NO_SPECIES, total_pressure(get_field("n",electrons[0]),
-                                        get_field("Ttot", electrons[0]),
-                                        get_field("Ttot", ions[0]), norm))
+                set_field("q_es", s, electrostatic_ExB_heat_flux(grid, equi, norm,
+                                                    get_field("es_pot", NO_SPECIES),
+                                                    get_field("E_par",s),
+                                                    get_field("E_perp",s)))
+                set_field("fnay", s, get_field("n", s))
+                set_field("fnax", s, get_field("n", s))
+            set_field("pr", NO_SPECIES, total_pressure(get_field("n",electrons[0]),
+                                            get_field("Ttot", electrons[0]),
+                                            get_field("Ttot", ions[0]), norm))
 
-        return out, tau_arr[time_index]
+            averaged = materialize_fields(toroidal_avg(out))
+            return averaged, tau_arr[time_index]
+        finally:
+            for da in opened:
+                close = getattr(da, "close", None)
+                if close is not None:
+                    close()
 
 def calculate_temperatures(params, norm, spec, n, u_par, E_par, E_perp):
     n.attrs["norm"] = norm.n0
@@ -222,6 +289,27 @@ def toroidal_avg(genex_out):
         for s in genex_out[key].keys():
             out[key][s] = genex_out[key][s].mean(dim="phi", keep_attrs=True)
     return out
+
+
+def materialize_fields(genex_out):
+    """Compute a nested field dictionary once and preserve its structure."""
+    keys = []
+    values = []
+    for field, field_block in genex_out.items():
+        for species_name, value in field_block.items():
+            keys.append((field, species_name))
+            values.append(value)
+
+    computed = dask.compute(*values)
+    out = defaultdict(dict)
+    for (field, species_name), value in zip(keys, computed):
+        out[field][species_name] = value
+    return out
+
+
+def is_hdf_error(error):
+    message = str(error).lower()
+    return "hdf error" in message or "netcdf: hdf" in message
 
 def unnormalize(var):
     return var*var.norm

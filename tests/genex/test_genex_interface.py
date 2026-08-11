@@ -17,6 +17,7 @@ from neutral_coupling.genex_coupling.genex_interface import (
     species,
     get_genex_species,
     retry_compute,
+    materialize_fields,
 )
 
 @pytest.fixture
@@ -238,9 +239,11 @@ def test_load_latest_genex_fields(
 
         # ---- mock derived functions ----
         mock_efield.return_value = "efield"
-        mock_vel.ExB_velocity.return_value = 1.0
-        mock_vel.diamagnetic_velocity.return_value = 2.0
-        mock_total_pressure.return_value = MagicMock(values=fake_data)
+        mock_vel.ExB_velocity.return_value = fake_data.copy()
+        mock_vel.ExB_velocity.return_value.attrs["norm"] = fake_norm.c_s0
+        mock_vel.diamagnetic_velocity.return_value = fake_data.copy() * 2
+        mock_vel.diamagnetic_velocity.return_value.attrs["norm"] = fake_norm.c_s0
+        mock_total_pressure.return_value = fake_data.copy()
         uvec = xr.DataArray(
             np.ones((3, 3, 4)),  # (vector, RZ, phi)
             dims=("vector", "RZ", "phi"),
@@ -292,7 +295,7 @@ def test_load_latest_genex_fields(
 
         # radial velocity combination
         for s in spec:
-            assert out["u_rad"][s] == 1.0 + 2.0
+            assert np.allclose(out["u_rad"][s], 3.0)
 
         # ensure temperature calculation called
         assert mock_calc_temp.call_count == len(spec)
@@ -342,9 +345,11 @@ def test_load_latest_genex_fields_uses_requested_stable_time_index(
 
         mock_load.side_effect = fake_loader
         mock_efield.return_value = "efield"
-        mock_vel.ExB_velocity.return_value = 1.0
-        mock_vel.diamagnetic_velocity.return_value = 2.0
-        mock_total_pressure.return_value = MagicMock(values=fake_data)
+        mock_vel.ExB_velocity.return_value = fake_data.copy()
+        mock_vel.ExB_velocity.return_value.attrs["norm"] = fake_norm.c_s0
+        mock_vel.diamagnetic_velocity.return_value = fake_data.copy() * 2
+        mock_vel.diamagnetic_velocity.return_value.attrs["norm"] = fake_norm.c_s0
+        mock_total_pressure.return_value = fake_data.copy()
         mock_vel.parallel_ion_velocity_vector.return_value = xr.DataArray(
             np.ones((3, 3, 4)),
             dims=("vector", "RZ", "phi"),
@@ -403,10 +408,16 @@ def test_load_latest_genex_fields_allows_zero_mask_changes(
         patch("neutral_coupling.genex_coupling.genex_interface.calculate_temperatures") as mock_calc_temp,
         patch("neutral_coupling.genex_coupling.genex_interface.total_pressure") as mock_total_pressure,
     ):
-        mock_vel.ExB_velocity.return_value = 1.0
-        mock_vel.diamagnetic_velocity.return_value = 2.0
-        mock_total_pressure.return_value = MagicMock(
-            values=np.ones((3, 4))
+        velocity = xr.DataArray(
+            np.ones((3, 4)), dims=("RZ", "phi"),
+            coords={"RZ": np.arange(3), "phi": np.arange(4)},
+        )
+        velocity.attrs["norm"] = fake_norm.c_s0
+        mock_vel.ExB_velocity.return_value = velocity
+        mock_vel.diamagnetic_velocity.return_value = velocity * 2
+        mock_vel.diamagnetic_velocity.return_value.attrs["norm"] = fake_norm.c_s0
+        mock_total_pressure.return_value = xr.DataArray(
+            np.ones((3, 4)), dims=("RZ", "phi")
         )
         mock_vel.parallel_ion_velocity_vector.return_value = xr.DataArray(
             np.ones((3, 3, 4)),
@@ -494,6 +505,50 @@ def test_toroidal_avg(fake_data):
     for s in ["D", "C"]:
         expected = genex_out["density"][s].mean(dim="phi")
         assert np.allclose(out["density"][s], expected)
+
+
+def test_materialize_fields_computes_dask_arrays_once():
+    import dask.array as da
+
+    source = xr.DataArray(
+        da.ones((4, 3), chunks=(2, 3)), dims=("phi", "RZ"),
+        attrs={"norm": 7},
+    )
+    result = materialize_fields({"n": {"D": source.mean("phi")}})
+
+    assert not hasattr(result["n"]["D"].data, "__dask_graph__")
+    assert np.allclose(result["n"]["D"], 1.0)
+    assert result["n"]["D"].attrs["norm"] == 7
+
+
+@patch("neutral_coupling.genex_coupling.genex_interface.time.sleep")
+@patch("neutral_coupling.genex_coupling.genex_interface.random.uniform", return_value=1.0)
+@patch("neutral_coupling.genex_coupling.genex_interface._load_latest_genex_fields_once")
+def test_load_transaction_reopens_with_exponential_backoff(
+    mock_once, mock_uniform, mock_sleep, fake_grid, fake_norm, fake_species
+):
+    mock_once.side_effect = [
+        RuntimeError("NetCDF: HDF error"),
+        RuntimeError("NetCDF: HDF error"),
+        ("fields", 1.0),
+    ]
+
+    result = load_latest_genex_fields(
+        "path", fake_species, fake_grid, "equi", "params", fake_norm,
+        -1, 1, read_attempts=4, retry_delay=0.5, retry_max_delay=10,
+    )
+
+    assert result == ("fields", 1.0)
+    assert mock_once.call_count == 3
+    assert [call.args[0] for call in mock_sleep.call_args_list] == [0.5, 1.0]
+
+
+def test_load_transaction_rejects_unknown_mode(fake_grid, fake_norm, fake_species):
+    with pytest.raises(ValueError, match="Unknown GENE-X read mode"):
+        load_latest_genex_fields(
+            "path", fake_species, fake_grid, "equi", "params", fake_norm,
+            -1, 1, read_mode="legacy",
+        )
 
 def test_multiple_ions_raises(fake_grid, fake_norm):
     all_spec = [

@@ -17,3 +17,6 @@ debug_log.txt
 params_*out.txt
 notes.txt
 tests/genex/integration/input_files/fort.31
+*.out
+*.log
+profile-results/

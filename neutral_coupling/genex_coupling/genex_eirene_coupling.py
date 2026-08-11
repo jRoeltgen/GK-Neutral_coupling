@@ -95,19 +95,14 @@ def main(args, deps=None):
     last_tau_advance = perf_counter()
     # Main loop - runs for duration of GENE-X
     while deps.pid_exists(args.pid):
-        for attempt in range(3):
-            try:
-                genex_fields, tau = genex_interface.load_latest_genex_fields(
-                    genex_path, genex_species, grid, equi, params, norm,
-                    time_index, timeout)
-                break
-            except RuntimeError as e:
-                if "HDF error" in str(e):
-                    print(f"Transient HDF error, retry {attempt+1}")
-                    continue
-                raise
-        else:
-            raise RuntimeError("Repeated NetCDF HDF errors.")
+        genex_fields, tau = genex_interface.load_latest_genex_fields(
+            genex_path, genex_species, grid, equi, params, norm,
+            time_index, timeout,
+            read_mode=getattr(args, "genex_read_mode", "averaged"),
+            read_attempts=getattr(args, "genex_read_attempts", 6),
+            retry_delay=getattr(args, "genex_retry_delay", 0.5),
+            retry_max_delay=getattr(args, "genex_retry_max_delay", 10.0),
+        )
 
         timeout = 300
         if (tau <= last_tau):
@@ -118,7 +113,7 @@ def main(args, deps=None):
             deps.sleep(5)
             continue
         unnormalize_all(genex_fields)
-        genex_fields_2D = genex_interface.toroidal_avg(genex_fields)
+        genex_fields_2D = genex_fields
         ion_temperature_values = {}
         if not args.SumTemp:
             # Prepare GENE-X ion temperatures for use as source temperature
@@ -292,31 +287,24 @@ def prepare_genex_ion_temperatures(
 def interpolate_all_moments(gmtry, tri, genex_out, radial_mask, poloidal_mask):
     """ Interpolate GENE-X data onto plasma grid used by Eirene"""
     out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    flattened = []
-    keys = []
-
     for field, field_block in genex_out.items():
         for species, value in field_block.items():
-            flattened.append(value.data)   # keep as dask array
-            keys.append((field, species))
-
-    for k, arr in zip(keys, flattened):
-        if dask.is_dask_collection(arr):
-            _ = arr.compute()
-    computed = dask.compute(*flattened)
-
-    for (field, species), arr in zip(keys, computed):
-        if field.endswith("ax"):
-            ind = [0,2]
-            mask = poloidal_mask
-        elif field.endswith("ay"):
-            ind = [2,3]
-            mask = radial_mask
-        else:
-            ind = [0,1,2,3]
-            mask = np.zeros_like(poloidal_mask, dtype=bool)
-        out[field][species] = interp_moments(gmtry, tri, arr, ind)
-        out[field][species][mask] = 0
+            arr = value.data
+            if dask.is_dask_collection(arr):
+                raise TypeError(
+                    "Interpolation requires materialized GENE-X fields"
+                )
+            if field.endswith("ax"):
+                ind = [0,2]
+                mask = poloidal_mask
+            elif field.endswith("ay"):
+                ind = [2,3]
+                mask = radial_mask
+            else:
+                ind = [0,1,2,3]
+                mask = np.zeros_like(poloidal_mask, dtype=bool)
+            out[field][species] = interp_moments(gmtry, tri, arr, ind)
+            out[field][species][mask] = 0
     return out
 
 def normalize_genex_params(params):
@@ -514,6 +502,17 @@ def cli():
                             "Default (False) selects latest time slice. "
                             "Changing this alters coupling semantics and should "
                             "NOT be used in production runs.")
+    parser.add_argument(
+        "--genex-read-mode", choices=("averaged", "full"), default="averaged",
+        help="Materialize toroidally averaged fields (default) or eagerly "
+             "load the selected full 3-D timestep before averaging.",
+    )
+    parser.add_argument("--genex-read-attempts", type=int, default=6,
+                        help="Maximum fresh-file attempts after HDF errors.")
+    parser.add_argument("--genex-retry-delay", type=float, default=0.5,
+                        help="Initial HDF retry delay in seconds.")
+    parser.add_argument("--genex-retry-max-delay", type=float, default=10.0,
+                        help="Maximum HDF retry delay in seconds.")
     args = parser.parse_args()
     main(args)
 

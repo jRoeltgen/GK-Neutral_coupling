@@ -32,6 +32,10 @@ def coupling_env(monkeypatch, tmp_path):
         eirene_path=tmp_path,
         genex_path=tmp_path,
         eirene_command="eirobjx",
+        genex_read_mode="averaged",
+        genex_read_attempts=6,
+        genex_retry_delay=0.5,
+        genex_retry_max_delay=10.0,
     )
 
     # ----------------------------
@@ -94,7 +98,10 @@ def coupling_env(monkeypatch, tmp_path):
             attrs={"norm":1.0}
         )
 
-    fields = {"es_pot": {"N/A": make_es_pot(1.0)}}
+    fields = {
+        "es_pot": {"N/A": xr.DataArray([1.0], dims=("RZ",), attrs={"norm": 1.0})},
+        "Ttot": {"D": xr.DataArray([4.0], dims=("RZ",), attrs={"norm": 1.0})},
+    }
 
     monkeypatch.setattr(
         mod.genex_interface,
@@ -225,32 +232,44 @@ def test_main_multiple_iterations(coupling_env):
     assert env["deps"].write_nc.call_count == 3
     assert (env["args"].eirene_path / "eirene_sources_000002" / "fort.31").exists()
 
-def test_main_retries_transient_hdf_error(coupling_env):
+def test_main_passes_read_transaction_settings(coupling_env):
     env = coupling_env
-
-    env["mod"].genex_interface.load_latest_genex_fields.side_effect = [
-        RuntimeError("HDF error while reading"),
-        (env["fields"], 0.001),
-    ]
-
     env["mod"].main(env["args"], deps=env["deps"])
 
-    assert env["mod"].genex_interface.load_latest_genex_fields.call_count == 2
-    env["deps"].run_eirene.assert_called_once()
+    kwargs = env["mod"].genex_interface.load_latest_genex_fields.call_args.kwargs
+    assert kwargs == {
+        "read_mode": "averaged",
+        "read_attempts": 6,
+        "retry_delay": 0.5,
+        "retry_max_delay": 10.0,
+    }
 
-def test_main_repeated_hdf_errors_raise(coupling_env):
+def test_main_read_transaction_failure_has_no_side_effects(coupling_env):
     env = coupling_env
+    env["mod"].genex_interface.load_latest_genex_fields.side_effect = RuntimeError(
+        "GENE-X averaged read failed after 6 attempts"
+    )
 
-    env["mod"].genex_interface.load_latest_genex_fields.side_effect = [
-        RuntimeError("HDF error while reading"),
-        RuntimeError("HDF error while reading"),
-        RuntimeError("HDF error while reading"),
-    ]
-
-    with pytest.raises(RuntimeError, match="Repeated NetCDF HDF errors"):
+    with pytest.raises(RuntimeError, match="failed after 6 attempts"):
         env["mod"].main(env["args"], deps=env["deps"])
 
     env["deps"].run_eirene.assert_not_called()
+    env["deps"].write_nc.assert_not_called()
+
+
+def test_interpolate_all_moments_rejects_lazy_fields(monkeypatch):
+    import dask.array as da
+
+    fields = {
+        "n": {
+            "D": xr.DataArray(da.ones((2,), chunks=(1,)), dims=("RZ",))
+        }
+    }
+    with pytest.raises(TypeError, match="materialized"):
+        interpolate_all_moments(
+            "gmtry", "tri", fields,
+            np.array([False]), np.array([False]),
+        )
 
 def test_main_checkpoint_uses_next_eirene_index(coupling_env):
     env = coupling_env
@@ -264,12 +283,12 @@ def test_main_checkpoint_uses_next_eirene_index(coupling_env):
     assert (env["args"].eirene_path / "eirene_sources_000004" / "fort.31").exists()
     assert env["deps"].write_nc.call_args.args[0].endswith("out_000004.nc.tmp")
 
-def test_unnormalize_all_mutates():
+def test_unnormalize_all_mutates(monkeypatch):
     from neutral_coupling.genex_coupling import genex_eirene_coupling as mod
 
     data = {"field": {"D": 1.0}}
 
-    mod.genex_interface.unnormalize = MagicMock(return_value=2.0)
+    monkeypatch.setattr(mod.genex_interface, "unnormalize", MagicMock(return_value=2.0))
 
     mod.unnormalize_all(data)
 
@@ -285,9 +304,6 @@ def test_get_genex_electron_name_none():
 def test_main_sumtemp_false_writes_temperatures(coupling_env, monkeypatch):
     env = coupling_env
     env["args"].SumTemp = False
-    env["mod"].genex_interface.toroidal_avg.return_value = {
-        "Ttot": {"D": np.array([4.0])},
-    }
     env["edat"].full_source_in_SI = {}
     monkeypatch.setattr(
         env["mod"],

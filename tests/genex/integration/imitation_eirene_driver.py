@@ -35,6 +35,7 @@ def test_full_coupling(
     collision_types=None,
     genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test",
     eirene_path = None,
+    read_mode="averaged",
 ):
     """
     Test of full coupling with analytic replacement of Eirene. Checks that files
@@ -83,6 +84,10 @@ def test_full_coupling(
             genex_path=genex_path,
             eirene_path=eirene_path,
             eirene_command="pwd",
+            genex_read_mode=read_mode,
+            genex_read_attempts=6,
+            genex_retry_delay=0.5,
+            genex_retry_max_delay=10.0,
         )
 
         deps = SimpleNamespace(
