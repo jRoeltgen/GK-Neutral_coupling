@@ -543,6 +543,42 @@ def test_load_transaction_reopens_with_exponential_backoff(
     assert [call.args[0] for call in mock_sleep.call_args_list] == [0.5, 1.0]
 
 
+@patch("neutral_coupling.genex_coupling.genex_interface.time.sleep")
+@patch("neutral_coupling.genex_coupling.genex_interface.random.uniform", return_value=1.0)
+@patch("neutral_coupling.genex_coupling.genex_interface._load_latest_genex_fields_once")
+def test_load_transaction_retries_zero_dimension_race(
+    mock_once, mock_uniform, mock_sleep, fake_grid, fake_norm, fake_species
+):
+    mock_once.side_effect = [
+        ValueError("Cannot handle size zero dimensions"),
+        ("fields", 1.0),
+    ]
+
+    result = load_latest_genex_fields(
+        "path", fake_species, fake_grid, "equi", "params", fake_norm,
+        -1, 1, read_attempts=4, retry_delay=0.5, retry_max_delay=10,
+    )
+
+    assert result == ("fields", 1.0)
+    assert mock_once.call_count == 2
+    mock_sleep.assert_called_once_with(0.5)
+
+
+@patch("neutral_coupling.genex_coupling.genex_interface._load_latest_genex_fields_once")
+def test_load_transaction_does_not_retry_unrelated_value_error(
+    mock_once, fake_grid, fake_norm, fake_species
+):
+    mock_once.side_effect = ValueError("invalid species metadata")
+
+    with pytest.raises(ValueError, match="invalid species metadata"):
+        load_latest_genex_fields(
+            "path", fake_species, fake_grid, "equi", "params", fake_norm,
+            -1, 1, read_attempts=4,
+        )
+
+    mock_once.assert_called_once()
+
+
 def test_load_transaction_rejects_unknown_mode(fake_grid, fake_norm, fake_species):
     with pytest.raises(ValueError, match="Unknown GENE-X read mode"):
         load_latest_genex_fields(

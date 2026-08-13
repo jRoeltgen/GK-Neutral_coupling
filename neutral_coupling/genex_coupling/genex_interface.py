@@ -122,8 +122,8 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                 gpath, all_spec, grid, equi, params, norm, time_index,
                 timeout, read_mode,
             )
-        except (RuntimeError, OSError) as error:
-            if not is_hdf_error(error):
+        except (RuntimeError, OSError, ValueError) as error:
+            if not is_transient_genex_read_error(error):
                 raise
             last_error = error
             if attempt == read_attempts:
@@ -132,7 +132,7 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
             if sleep_for > 0:
                 sleep_for *= random.uniform(0.8, 1.2)
             print(
-                f"Transient NetCDF/HDF error during GENE-X {read_mode} "
+                f"Transient diagnostic error during GENE-X {read_mode} "
                 f"read (attempt {attempt}/{read_attempts}); reopening after "
                 f"{sleep_for:.2f} s: {error}",
                 flush=True,
@@ -142,7 +142,7 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
 
     raise RuntimeError(
         f"GENE-X {read_mode} read failed after {read_attempts} attempts due "
-        f"to repeated NetCDF/HDF errors: {last_error}"
+        f"to repeated transient diagnostic errors: {last_error}"
     ) from last_error
 
 
@@ -310,6 +310,15 @@ def materialize_fields(genex_out):
 def is_hdf_error(error):
     message = str(error).lower()
     return "hdf error" in message or "netcdf: hdf" in message
+
+def is_transient_genex_read_error(error):
+    """Identify failures caused by reading diagnostics during a write."""
+    if is_hdf_error(error):
+        return True
+    return (
+        isinstance(error, ValueError)
+        and "cannot handle size zero dimensions" in str(error).lower()
+    )
 
 def unnormalize(var):
     return var*var.norm
