@@ -1,7 +1,22 @@
 #files ignored in git repository
 *~
 new_*
-test_data/new_*
 __pycache__/
 .hypothesis
 */.hypothesis
+*.egg-info/
+*local.sh
+job.out
+genex.pid
+genex_output.log
+*.pyc
+params_in.txt
+input_sources_??????.nc
+eirene_sources_??????/
+debug_log.txt
+params_*out.txt
+notes.txt
+tests/genex/integration/input_files/fort.31
+*.out
+*.log
+profile-results/
