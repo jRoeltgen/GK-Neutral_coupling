@@ -78,6 +78,8 @@ def main(args, deps=None):
     grid_r = np.asarray(r_all*norm["R0"])
     # TODO: Need to change this negative to function of grid._flipped_z and equi._flipped_Z
     grid_z = np.asarray(z_all*norm["R0"])
+    in_target = load_genex_in_target(genex_path)
+    in_plasma, plasma_field_mask = make_in_plasma_mask(compute, in_target)
     if params["params_time_loop"]["start_from_checkpoint"]:
         index = next_eirene_index(eirene_path, args.filepattern)
     else:
@@ -90,7 +92,7 @@ def main(args, deps=None):
         time_index = -1
     last_tau = -1
     # Precompute triangulation
-    tri = build_triangulation(grid_r[compute], grid_z[compute])
+    tri = build_triangulation(grid_r[in_plasma], grid_z[in_plasma])
     timeout = 600
     last_tau_advance = perf_counter()
     # Main loop - runs for duration of GENE-X
@@ -122,12 +124,14 @@ def main(args, deps=None):
                 genex_species,
                 grid_r,
                 grid_z,
-                compute,
+                in_plasma,
                 deps.sparse_temperature_handler,
+                field_mask=plasma_field_mask,
             )
         interpolated = interpolate_all_moments(b2dat.gmtry, tri,
-                                               genex_fields_2D, pol_mask,
-                                               rad_mask)
+                                               genex_fields_2D, rad_mask,
+                                               pol_mask,
+                                               field_mask=plasma_field_mask)
         del genex_fields_2D, genex_fields
         prepare_fort31(edat, interpolated, genex_electrons,
                      edat.species_names["bulk_ions"])
@@ -244,6 +248,30 @@ def unnormalize_all(genex_out):
         for species, value in field_block.items():
             genex_out[field][species] = genex_interface.unnormalize(value)
 
+
+def load_genex_in_target(genex_path, phi_index=0):
+    """Load the static target-cell flag in compute-point ordering."""
+    target = genex_interface.load_snaps_genex(
+        genex_path, None, "in_target"
+    )
+    if "phi" in target.dims:
+        target = target.isel(phi=phi_index)
+    return np.asarray(target, dtype=bool).reshape(-1)
+
+
+def make_in_plasma_mask(compute, in_target):
+    """Return full-grid and compute-relative masks excluding target cells."""
+    compute = np.asarray(compute, dtype=bool)
+    target_on_compute = np.asarray(in_target, dtype=bool).reshape(-1)
+    if target_on_compute.size != np.count_nonzero(compute):
+        raise ValueError(
+            "in_target size does not match the number of GENE-X compute cells"
+        )
+    plasma_field_mask = ~target_on_compute
+    in_plasma = compute.copy()
+    in_plasma[compute] = plasma_field_mask
+    return in_plasma, plasma_field_mask
+
 def prepare_genex_ion_temperatures(
     genex_fields_2D,
     genex_species,
@@ -251,6 +279,7 @@ def prepare_genex_ion_temperatures(
     grid_z,
     compute,
     sparse_temperature_handler,
+    field_mask=None,
 ):
     """Prepare GENE-X ion temperature to be used as source temperature.
     Nearest-fill GENE-X ion temperatures from any usable samples."""
@@ -263,6 +292,14 @@ def prepare_genex_ion_temperatures(
         temperature = np.asarray(
             genex_fields_2D["Ttot"][species.name]
         ).reshape(-1)
+        if field_mask is not None:
+            field_mask = np.asarray(field_mask, dtype=bool).reshape(-1)
+            if temperature.size != field_mask.size:
+                raise ValueError(
+                    f"GENE-X temperature size for '{species.name}' "
+                    "does not match the compute-cell mask"
+                )
+            temperature = temperature[field_mask]
         if temperature.size != points.shape[0]:
             raise ValueError(
                 f"GENE-X temperature size for '{species.name}' "
@@ -284,7 +321,8 @@ def prepare_genex_ion_temperatures(
 
     return temperatures
 
-def interpolate_all_moments(gmtry, tri, genex_out, radial_mask, poloidal_mask):
+def interpolate_all_moments(gmtry, tri, genex_out, radial_mask, poloidal_mask,
+                            field_mask=None):
     """ Interpolate GENE-X data onto plasma grid used by Eirene"""
     out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     for field, field_block in genex_out.items():
@@ -294,6 +332,15 @@ def interpolate_all_moments(gmtry, tri, genex_out, radial_mask, poloidal_mask):
                 raise TypeError(
                     "Interpolation requires materialized GENE-X fields"
                 )
+            arr = np.asarray(arr).reshape(-1)
+            if field_mask is not None:
+                active = np.asarray(field_mask, dtype=bool).reshape(-1)
+                if arr.size != active.size:
+                    raise ValueError(
+                        f"GENE-X field '{field}/{species}' size does not "
+                        "match the compute-cell mask"
+                    )
+                arr = arr[active]
             if field.endswith("ax"):
                 ind = [0,2]
                 mask = poloidal_mask

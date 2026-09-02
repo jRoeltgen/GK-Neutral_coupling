@@ -1095,6 +1095,13 @@ class eirene:
                 d[k] = self._convert_source_to_SI(v, root_key)
 
     def _convert_source_to_SI(self, arr, moment):
+        # EIRENE source-file units are:
+        #   particle: AMP*CM**-3
+        #   momentum: G*CM/S*AMP*CM**-3
+        #   energy:   WATT*CM**-3
+        # Dividing the first two by elementary charge converts current to a
+        # particle rate. Momentum is consequently momentum/(volume*time),
+        # equivalent in SI to force density [N/m^3].
         match moment:
             case(0 | "0" | "n" | "particle"):
                 return arr*1e6/pyconst.elementary_charge

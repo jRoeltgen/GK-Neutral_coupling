@@ -76,6 +76,9 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
         eirene_path / "fort.31", fake_eirene.plasma_gmtry["nx"]+2,
         fake_eirene.plasma_gmtry["ny"]+2, len(fake_parser.species["bulk_ions"])
     )
+    fake_eirene.write_ft31.assert_called_once_with(
+        eirene_path / "fort.31.template"
+    )
 
     # B2 init
     mock_b2_class.assert_called_once_with(b2_path)
@@ -86,6 +89,32 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
     np.testing.assert_array_equal(
         rad_mask, np.array([[False, True], [True, False]])
     )
+
+
+@patch("neutral_coupling.genex_coupling.eirene_interface.EireneInputParser")
+@patch("neutral_coupling.genex_coupling.eirene_interface.triangle_mesh.triangle_mesh")
+@patch("neutral_coupling.genex_coupling.eirene_interface.B2IO.B2")
+@patch("neutral_coupling.genex_coupling.eirene_interface.eireneIO.eirene")
+def test_eirene_interface_prefers_existing_fort31_template(
+    mock_eirene_class, mock_b2_class, mock_mesh_class, mock_parser_class,
+    tmp_path,
+):
+    template = tmp_path / "fort.31.template"
+    template.touch()
+    fake_eirene = mock_eirene_class.return_value
+    fake_eirene.plasma_gmtry = {"nx": 2, "ny": 3}
+    fake_eirene.fort31 = {
+        "fnax": np.ones((4, 5)),
+        "fnay": np.ones((4, 5)),
+    }
+    parser = mock_parser_class.return_value
+    parser.species = {"bulk_ions": ["D"]}
+    parser.masses = {"bulk_ions": [2.0]}
+
+    eirene_interface(tmp_path, tmp_path)
+
+    fake_eirene.read_ft31.assert_called_once_with(template, 4, 5, 1)
+    fake_eirene.write_ft31.assert_not_called()
 
 
 def test_map_ion_temperatures_directly_to_triangles():

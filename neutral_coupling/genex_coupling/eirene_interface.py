@@ -43,7 +43,22 @@ def eirene_interface(eirene_path, b2_path):
     nx = edat.plasma_gmtry["nx"]
     ny = edat.plasma_gmtry["ny"]
 
-    edat.read_ft31(eirene_path / Path("fort.31"), nx+2, ny+2, ns)
+    fort31_template = eirene_path / Path("fort.31.template")
+    fort31_runtime = eirene_path / Path("fort.31")
+    bootstrap_template = not fort31_template.is_file()
+    fort31_initial = fort31_runtime if bootstrap_template else fort31_template
+
+    edat.read_ft31(fort31_initial, nx+2, ny+2, ns)
+    if bootstrap_template:
+        # Capture the initial mask and fields before the mutable runtime file is
+        # overwritten by later coupling iterations. Future starts consistently
+        # initialize from this colocated template.
+        edat.write_ft31(fort31_template)
+        print(
+            f"Created EIRENE fort.31 template from fallback {fort31_runtime}: "
+            f"{fort31_template}",
+            flush=True,
+        )
     if edat.fort31["fnax"].ndim == 3:
         pol_mask = edat.fort31["fnax"][:,:,0] == 0
         rad_mask = edat.fort31["fnay"][:,:,0] == 0

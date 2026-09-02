@@ -1,4 +1,5 @@
-from scipy.interpolate import (griddata, LinearNDInterpolator)
+from scipy.interpolate import (griddata, LinearNDInterpolator,
+                               NearestNDInterpolator)
 from scipy.spatial import Delaunay
 from collections import defaultdict
 import numpy as np
@@ -56,9 +57,22 @@ def interp_moments(gmtry, tri, field, ind):
         )
     r = np.mean(gmtry["crx"][:,:,ind],2)
     z = np.mean(gmtry["cry"][:,:,ind],2)
-    # Maybe RBF interpolator?
-    interp = LinearNDInterpolator(tri, field.ravel())
+    values = np.asarray(field).ravel()
+    if values.size != tri.points.shape[0]:
+        raise ValueError(
+            "GENE-X field size does not match the interpolation triangulation"
+        )
+    # Linear interpolation is preferred within the GENE-X plasma domain.  An
+    # EIRENE face can lie just beyond that domain (notably at a target), where
+    # extrapolating linearly is undefined; use its nearest plasma cell there.
+    interp = LinearNDInterpolator(tri, values)
     xi = np.column_stack([r.ravel(), z.ravel()])
-    interp_data = interp(xi).reshape(r.shape)
+    interp_data = np.asarray(interp(xi))
+    outside = tri.find_simplex(xi) < 0
+    if np.any(outside):
+        nearest = NearestNDInterpolator(tri.points, values)
+        interp_data[outside] = nearest(xi[outside])
+    interp_data = interp_data.reshape(r.shape)
+    # Preserve the prior fail-safe for unusable samples within the domain.
     interp_data[np.isnan(interp_data)] = 0
     return interp_data

@@ -214,6 +214,21 @@ def test_interp_moments_linear_field():
 
     assert np.allclose(result[0, 0], expected)
 
+
+def test_interp_moments_uses_nearest_outside_plasma_domain():
+    gmtry = {
+        "crx": np.array([[[2.0, 2.0, 2.0, 2.0]]]),
+        "cry": np.array([[[0.0, 0.0, 0.0, 0.0]]]),
+    }
+    grid_r = np.array([0.0, 1.0, 0.0])
+    grid_z = np.array([0.0, 0.0, 1.0])
+    tri = build_triangulation(grid_r, grid_z)
+
+    result = interp_moments(gmtry, tri, np.array([10.0, 20.0, 30.0]),
+                            ind=[0, 1, 2, 3])
+
+    assert result[0, 0] == 20.0
+
 @given(
     nx=st.integers(min_value=1, max_value=5),
     ny=st.integers(min_value=1, max_value=5),

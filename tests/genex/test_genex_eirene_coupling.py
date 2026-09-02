@@ -81,6 +81,11 @@ def coupling_env(monkeypatch, tmp_path):
         "wait_for_genex_init",
         MagicMock(return_value=(grid, None, params, norm, r_all, z_all, compute)),
     )
+    monkeypatch.setattr(
+        mod,
+        "load_genex_in_target",
+        MagicMock(return_value=np.array([False])),
+    )
 
     monkeypatch.setattr(
         mod.genex_interface,
