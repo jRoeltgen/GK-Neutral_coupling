@@ -180,6 +180,9 @@ def test_main_single_iteration_success(coupling_env):
     env["deps"].run_eirene.assert_called_once()
     assert env["deps"].run_eirene.call_args.kwargs["command"] == "eirobjx"
     env["deps"].write_nc.assert_called_once()
+    assert env["deps"].write_nc.call_args.kwargs["genex_tau"] == pytest.approx(
+        0.001
+    )
     env["deps"].replace.assert_called_once()
     env["deps"].killpg.assert_not_called()
     assert (env["args"].eirene_path / "eirene_sources_000000" / "fort.31").exists()

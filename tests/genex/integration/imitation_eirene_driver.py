@@ -165,6 +165,7 @@ def checked_write_nc(
     dim_RZ,
     temperature_values=None,
     write_temperature=False,
+    genex_tau=None,
     *,
     mode="summed",
     collision_types=(),
@@ -247,6 +248,7 @@ def checked_write_nc(
         dim_RZ,
         temperature_values=temperature_values,
         write_temperature=write_temperature,
+        genex_tau=genex_tau,
     )
 
     if mode == "summed":

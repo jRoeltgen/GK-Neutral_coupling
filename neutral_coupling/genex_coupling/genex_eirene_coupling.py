@@ -218,6 +218,7 @@ def main(args, deps=None):
             grid_r.size,
             temperature_values=interp_temperatures,
             write_temperature=write_temperatures,
+            genex_tau=tau,
         )
         deps.replace(filename_tmp, filename)
         backup_eirene_files(eirene_path, index)

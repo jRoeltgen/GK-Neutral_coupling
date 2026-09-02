@@ -3,7 +3,8 @@ import numpy as np
 
 def write_sources_nc(filename, sources, dim_RZ, dim_phi=1,
                      temperature_values=None,
-                     write_temperature=False):
+                     write_temperature=False,
+                     genex_tau=None):
     """
     Write sources to NetCDF with structure:
 
@@ -26,6 +27,11 @@ def write_sources_nc(filename, sources, dim_RZ, dim_phi=1,
 
     write_temperature : bool
         Whether to write the temperature variable
+
+    genex_tau : float, optional
+        GENE-X diagnostic time used to construct these EIRENE sources. Stored
+        as a global NetCDF attribute so a source file can be matched back to
+        its originating GENE-X time slice.
     """
 
     moments = list(sources.keys())
@@ -44,6 +50,9 @@ def write_sources_nc(filename, sources, dim_RZ, dim_phi=1,
     ))
 
     with Dataset(filename, "w") as nc:
+
+        if genex_tau is not None:
+            nc.genex_tau = np.float64(genex_tau)
 
         # global dimensions
         nc.createDimension("dim_RZ", dim_RZ)

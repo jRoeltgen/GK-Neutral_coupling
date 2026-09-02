@@ -129,6 +129,21 @@ def test_write_sources_without_temperature(tmp_path, sample_sources):
 
                     assert np.allclose(data, expected.T)
 
+
+def test_write_sources_records_genex_tau(tmp_path, sample_sources):
+    outfile = tmp_path / "sources_with_tau.nc"
+
+    write_sources_nc(
+        outfile,
+        sample_sources,
+        dim_RZ=4,
+        dim_phi=5,
+        genex_tau=0.012345,
+    )
+
+    with Dataset(outfile) as nc:
+        assert nc.genex_tau == pytest.approx(0.012345)
+
 # --- Hypothesis strategy for sources dict ---
 @st.composite
 def sources_strategy(draw):
