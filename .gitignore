@@ -20,3 +20,4 @@ tests/genex/integration/input_files/fort.31
 *.out
 *.log
 profile-results/
+/analysis/output/
