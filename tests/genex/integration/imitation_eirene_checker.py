@@ -152,7 +152,7 @@ class CheckedRunEirene:
         self.source_sign_block_length = None
         self.source_index = 0
 
-    def __call__(self, timeout, eirene_path, command=None):
+    def __call__(self, timeout, eirene_path, command=None, output_file=None):
         # --- Read current GENE-X state (what EIRENE would see) ---
         b2dat = B2IO.B2(eirene_path)
         nx, ny = b2dat.gmtry["vol"].shape

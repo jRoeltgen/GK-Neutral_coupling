@@ -44,7 +44,6 @@ def coupling_env(monkeypatch, tmp_path):
     deps = SimpleNamespace(
         run_eirene=MagicMock(return_value=mod.status.SUCCESS),
         write_nc=MagicMock(),
-        killpg=MagicMock(),
         sleep=MagicMock(),
         replace=MagicMock(),
         pid_exists=MagicMock(side_effect=[True, False]),
@@ -179,15 +178,17 @@ def test_main_single_iteration_success(coupling_env):
 
     env["deps"].run_eirene.assert_called_once()
     assert env["deps"].run_eirene.call_args.kwargs["command"] == "eirobjx"
+    assert env["deps"].run_eirene.call_args.kwargs["output_file"] == (
+        env["args"].eirene_path / "run_000000_attempt_01.log"
+    )
     env["deps"].write_nc.assert_called_once()
     assert env["deps"].write_nc.call_args.kwargs["genex_tau"] == pytest.approx(
         0.001
     )
     env["deps"].replace.assert_called_once()
-    env["deps"].killpg.assert_not_called()
     assert (env["args"].eirene_path / "eirene_sources_000000" / "fort.31").exists()
 
-def test_main_timeout_kills_and_raises(coupling_env):
+def test_main_timeout_raises_without_archiving(coupling_env):
     env = coupling_env
 
     env["deps"].run_eirene.return_value = env["mod"].status.TIMEOUT
@@ -195,9 +196,9 @@ def test_main_timeout_kills_and_raises(coupling_env):
     with pytest.raises(RuntimeError):
         env["mod"].main(env["args"], deps=env["deps"])
 
-    env["deps"].killpg.assert_called_once()
+    assert not (env["args"].eirene_path / "eirene_sources_000000").exists()
 
-def test_main_eirene_error_kills_and_raises(coupling_env):
+def test_main_eirene_error_raises_without_archiving(coupling_env):
     env = coupling_env
 
     env["deps"].run_eirene.return_value = env["mod"].status.ERROR
@@ -205,7 +206,7 @@ def test_main_eirene_error_kills_and_raises(coupling_env):
     with pytest.raises(RuntimeError, match="EIRENE failed"):
         env["mod"].main(env["args"], deps=env["deps"])
 
-    env["deps"].killpg.assert_called_once()
+    assert not (env["args"].eirene_path / "eirene_sources_000000").exists()
 
 def test_main_retry_and_doubling(coupling_env):
     env = coupling_env
@@ -222,6 +223,15 @@ def test_main_retry_and_doubling(coupling_env):
 
     calls = [c.args[0] for c in env["deps"].run_eirene.call_args_list]
     assert calls == [10, 20, 40]
+    output_files = [
+        c.kwargs["output_file"]
+        for c in env["deps"].run_eirene.call_args_list
+    ]
+    assert output_files == [
+        env["args"].eirene_path / "run_000000_attempt_01.log",
+        env["args"].eirene_path / "run_000000_attempt_02.log",
+        env["args"].eirene_path / "run_000000_attempt_03.log",
+    ]
 
 def test_main_multiple_iterations(coupling_env):
     env = coupling_env
@@ -544,6 +554,8 @@ def test_backup_eirene_files_copies_fort31_and_moves_matching_files(tmp_path):
     (tmp_path / "fort.123").write_text("fort123")
     (tmp_path / "fort.9").write_text("keep")
     (tmp_path / "notes.txt").write_text("keep")
+    (tmp_path / "run_000007_attempt_01.log").write_text("attempt 1")
+    (tmp_path / "run_000006_attempt_01.log").write_text("older failure")
 
     backup_eirene_files(tmp_path, 7)
 
@@ -559,6 +571,9 @@ def test_backup_eirene_files_copies_fort31_and_moves_matching_files(tmp_path):
     assert not (tmp_path / "fort.123").exists()
     assert (tmp_path / "fort.9").exists()
     assert (tmp_path / "notes.txt").exists()
+    assert (dest / "run_000007_attempt_01.log").read_text() == "attempt 1"
+    assert not (tmp_path / "run_000007_attempt_01.log").exists()
+    assert (tmp_path / "run_000006_attempt_01.log").exists()
 
 def test_backup_eirene_files_ignores_matching_directories(tmp_path):
     (tmp_path / "fort.31").write_text("fort31")

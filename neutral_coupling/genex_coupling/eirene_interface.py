@@ -14,6 +14,7 @@ import numpy as np
 import os
 import signal
 import enum
+import sys
 class status(enum.IntEnum):
     SUCCESS = 0
     TIMEOUT = -1
@@ -247,8 +248,13 @@ def dict_to_array(dict_in, order, dim=None):
     return arr
 
 """Wrapper for running Eirene"""
-def run_eirene(Eirene_time, eirene_path, command="eirobjx", solpstop=""):
-    output_file = eirene_path / Path("run.log")
+def run_eirene(Eirene_time, eirene_path, command="eirobjx", solpstop="",
+               output_file=None):
+    eirene_path = Path(eirene_path)
+    if output_file is None:
+        output_file = eirene_path / Path("run_attempt_01.log")
+    else:
+        output_file = Path(output_file)
     try:
         with open(output_file, "w") as outfile:
             env = os.environ.copy()
@@ -284,12 +290,35 @@ def run_eirene(Eirene_time, eirene_path, command="eirobjx", solpstop=""):
 
                 return status.TIMEOUT
         if proc.returncode != 0:
-            print(f"❌{command} failed with return code {proc.returncode}")
+            print(
+                "\nERROR: EIRENE execution failed\n"
+                f"  command: {command}\n"
+                f"  working directory: {eirene_path}\n"
+                f"  exit status: {proc.returncode}\n"
+                f"  complete output: {output_file}",
+                file=sys.stderr,
+                flush=True,
+            )
             return status.ERROR
     except FileNotFoundError:
-        print(f"⚠️ Error: {command} command not found. Make sure it’s in your PATH.")
+        print(
+            "\nERROR: EIRENE command was not found\n"
+            f"  command: {command}\n"
+            f"  working directory: {eirene_path}\n"
+            f"  complete output: {output_file}",
+            file=sys.stderr,
+            flush=True,
+        )
         return status.ERROR
     except Exception as e:
-        print(f"⚠️  Unexpected error running {command}: {e}")
+        print(
+            "\nERROR: Unexpected failure while running EIRENE\n"
+            f"  command: {command}\n"
+            f"  working directory: {eirene_path}\n"
+            f"  complete output: {output_file}\n"
+            f"  exception: {e}",
+            file=sys.stderr,
+            flush=True,
+        )
         return status.ERROR
     return status.SUCCESS

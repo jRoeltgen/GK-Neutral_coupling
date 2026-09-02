@@ -83,7 +83,7 @@ export INTEGRATION_DIR="$SCRIPT_DIR"
 export GENEX_PATH="$RUN_DIR"
 export EIRENE_PATH="$(pwd)"
 
-if python -c "
+if python -u -c "
 import os
 import sys
 sys.path.insert(0, os.environ['INTEGRATION_DIR'])
@@ -105,6 +105,21 @@ test_full_coupling(
     cp -a "$RUN_DIR"/. .
 else
     status=$?
-    echo "Integration test failed; preserving output in $RUN_DIR" >&2
+    {
+        echo
+        echo "============================================================"
+        echo "FATAL: GENE-X/EIRENE integration test failed"
+        echo "Python exit status: $status"
+        echo "Slurm job: ${SLURM_JOB_ID:-not running under Slurm}"
+        echo "Preserving output in: $RUN_DIR"
+        echo "Cancelling the complete Slurm job."
+        echo "============================================================"
+    } >&2
+    if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+        scancel --signal=TERM "$SLURM_JOB_ID"
+    else
+        kill "$GENEX_PID" 2>/dev/null || true
+        wait "$GENEX_PID" 2>/dev/null || true
+    fi
     exit "$status"
 fi

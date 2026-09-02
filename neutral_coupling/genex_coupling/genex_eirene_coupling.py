@@ -13,8 +13,7 @@ from neutral_coupling.common.temperature_mapping_utils import (
 from . import genex_interface
 from neutral_coupling.common import source_post_processor as SPP
 from .write_netcdf import write_sources_nc
-from os import (killpg, replace)
-from signal import SIGTERM
+from os import replace
 from time import (sleep, perf_counter)
 from types import SimpleNamespace
 import numpy as np
@@ -35,7 +34,6 @@ def main(args, deps=None):
         deps = SimpleNamespace(
             run_eirene=run_eirene,
             write_nc=write_sources_nc,
-            killpg=killpg,
             sleep=sleep,
             replace=replace,
             pid_exists=psutil.pid_exists,
@@ -137,12 +135,21 @@ def main(args, deps=None):
                      edat.species_names["bulk_ions"])
         edat.write_ft31(eirene_path / Path("fort.31"))
 
-        print(f"[{index}] Running EIRENE", flush=True)
+        print(f"[{index}] Running EIRENE with GENE-X tau={tau}", flush=True)
         num_timeouts = 0
         eirene_time = args.eirene_time
         while num_timeouts<MAX_TIMEOUTS:
-            eirene_status = deps.run_eirene(eirene_time, eirene_path=eirene_path,
-                                            command=args.eirene_command)
+            attempt = num_timeouts + 1
+            output_file = (
+                eirene_path
+                / f"run_{index:06d}_attempt_{attempt:02d}.log"
+            )
+            eirene_status = deps.run_eirene(
+                eirene_time,
+                eirene_path=eirene_path,
+                command=args.eirene_command,
+                output_file=output_file,
+            )
             if eirene_status == status.SUCCESS:
                 break
             elif eirene_status == status.TIMEOUT:
@@ -152,14 +159,17 @@ def main(args, deps=None):
                     eirene_time *= 2
                     print(f"Re-running Eirene with {eirene_time} s.")
                 else:
-                    print(f"Eirene timed out {num_timeouts} time. Terminating GENE-X")
-                    # Will a GENE-X checkpoint be written if this is done?
-                    # TODO: There is a GENE-X soft kill to allow checkpoint
-                    deps.killpg(args.pid, SIGTERM)
-                    raise RuntimeError("EIRENE timed out more than max timeouts")
+                    raise RuntimeError(
+                        f"EIRENE timed out during coupling iteration {index} "
+                        f"after {num_timeouts} attempts; incomplete files "
+                        f"remain in {eirene_path}"
+                    )
             elif eirene_status == status.ERROR:
-                deps.killpg(args.pid, SIGTERM)
-                raise RuntimeError("EIRENE failed. Exiting")
+                raise RuntimeError(
+                    f"EIRENE failed during coupling iteration {index}; "
+                    f"complete output is in {output_file}; incomplete files "
+                    f"remain in {eirene_path}"
+                )
         edat.load_extra_forts(eirene_path=eirene_path, coll_to_adjust=None,
                               convert_units=True)
 
@@ -475,6 +485,7 @@ def backup_eirene_files(eirene_path, index):
         "fort.???",
         "fort.4?",
         "fort.1?",
+        f"run_{index:06d}_attempt_*.log",
     ]
 
     shutil.copy(Path(eirene_path) / Path("fort.31"), dest_dir)

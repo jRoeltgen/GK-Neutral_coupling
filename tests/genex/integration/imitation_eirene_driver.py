@@ -19,7 +19,6 @@ import psutil
 from functools import partial
 from netCDF4 import Dataset
 import time
-import subprocess
 import cProfile
 import pstats
 import dask
@@ -97,7 +96,6 @@ def test_full_coupling(
                 mode=temperature_mode,
                 collision_types=collision_types,
             ),
-            killpg=lambda pid, sig: cancel_slurm_job(),
             sleep=lambda x: time.sleep(0.1),
             replace=os.replace,
             pid_exists=psutil.pid_exists,
@@ -125,8 +123,6 @@ def test_full_coupling(
         if psutil.pid_exists(pid):
             # This should not happen → signal a bug, not normal cleanup
             print("ERROR: main() returned but GENEX is still running", flush=True)
-            cancel_slurm_job()
-            kill_tree(pid)
             raise RuntimeError("Invariant violated: GENEX still running after main()")
         else:
             print("Clean completion: leaving job to exit normally.", flush=True)
@@ -152,11 +148,10 @@ def test_full_coupling(
         stats.print_stats(30)
 
     except Exception:
-        print("Python error: canceling job...", flush=True)
+        print("Python integration error; cleanup is delegated to the launcher.",
+              flush=True)
         traceback.print_exc()
         sys.stderr.flush()
-        cancel_slurm_job()
-        kill_tree(pid)
         raise  # preserve failure for Slurm
 
 def checked_write_nc(
@@ -315,21 +310,3 @@ def _check_written_summed_sources(filename, entries):
         for field, species, expected in entries:
             written = group.groups[species].variables[field][:]
             np.testing.assert_allclose(written, expected)
-
-def kill_tree(pid):
-    try:
-        parent = psutil.Process(pid)
-        children = parent.children(recursive=True)
-        for p in children:
-            p.kill()
-        parent.kill()
-    except psutil.NoSuchProcess:
-        pass
-
-def cancel_slurm_job():
-    job_id = os.environ.get("SLURM_JOB_ID")
-    if job_id is not None:
-        subprocess.run(["scancel", job_id])
-        time.sleep(1)
-    else:
-        raise RuntimeError("Not running inside a SLURM job")

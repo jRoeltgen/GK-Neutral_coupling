@@ -440,14 +440,20 @@ def test_run_eirene_success(mock_popen, tmp_path):
     mock_popen.assert_called_once()
 
 @patch("neutral_coupling.genex_coupling.eirene_interface.subprocess.Popen")
-def test_run_eirene_failure(mock_popen, tmp_path):
+def test_run_eirene_failure_reports_metadata_only(mock_popen, tmp_path, capsys):
     mock_proc = mock_popen.return_value
     mock_proc.wait.return_value = None
     mock_proc.returncode = 1
+    output_file = tmp_path / "run_000003_attempt_02.log"
 
-    result = run_eirene(10, tmp_path)
+    result = run_eirene(10, tmp_path, output_file=output_file)
 
     assert result == status.ERROR
+    stderr = capsys.readouterr().err
+    assert "EIRENE execution failed" in stderr
+    assert "exit status: 1" in stderr
+    assert str(output_file) in stderr
+    assert output_file.exists()
 
 @patch("neutral_coupling.genex_coupling.eirene_interface.os.killpg")
 @patch("neutral_coupling.genex_coupling.eirene_interface.subprocess.Popen")
