@@ -79,8 +79,8 @@ def _write_equ_dg(
         fh.write(f"    jm    = {nr:12d};\n")
         fh.write(f"    km    = {nz:12d};\n")
         fh.write(f"    psib  = {0.0:18.8e} Wb/rad;\n")
-        fh.write(f"    btf   = {float(btf):18.8e} t;\n")
-        fh.write(f"    rtf   = {float(rtf):18.8e} m;\n")
+        fh.write(f"    btf   =  {float(btf):.15f}       t;\n") #btf   =  -0.928639633800000       t;
+        fh.write(f"    rtf   =  {float(rtf):.15f}       m;\n")
         fh.write("\n")
 
         fh.write("    r(1:jm);\n")
@@ -100,9 +100,9 @@ def _write_equ_dg(
         psi_shifted = psi - float(psib)
         _write_fortran_5e15_8(fh, psi_shifted.ravel(order="F"))
 
-def write_equ_dg(filename, equi):
-    r = equi.magnetic_geometry["R"]*1.7344390285254232
-    z = equi.magnetic_geometry["Z"]*1.7344390285254232
+def write_equ_dg(filename, equi, R0_normalization=1.7344390285254232):
+    r = equi.magnetic_geometry["R"]*R0_normalization
+    z = equi.magnetic_geometry["Z"]*R0_normalization
     psi = np.asarray(equi.magnetic_geometry["psi"]).T/(-2*np.pi)
     psib = np.asarray(equi.poloidal_flux_on_separatrix)/(-2*np.pi)
     btf = np.asarray(equi.magnetic_geometry["axis_Btor"])
