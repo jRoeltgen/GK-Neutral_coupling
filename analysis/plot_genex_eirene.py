@@ -111,7 +111,9 @@ def _genex_in_target_matrix(genex_path: Path, grid):
 def load_genex_moments(genex_path: Path, requested_time: float | None,
                        ):
     """Load physical n, T and u_parallel for every GENE-X species."""
-    grid, _equi, params, norm, r, z, compute = wait_for_genex_init(genex_path)
+    grid, _equi, params, norm, r, z, compute, _in_target = (
+        wait_for_genex_init(genex_path)
+    )
     species = get_genex_species(params)
     raw_species_names = params["params_species"]["names"]
     parameter_names = {str(raw).strip(): raw for raw in raw_species_names

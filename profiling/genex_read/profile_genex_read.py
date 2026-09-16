@@ -119,8 +119,8 @@ def main():
     dask.config.set(scheduler="synchronous")
 
     init_start = time.perf_counter()
-    grid, equi, params, norm, r_all, z_all, compute = genex_interface.wait_for_genex_init(
-        args.genex_path
+    grid, equi, params, norm, r_all, z_all, compute, _in_target = (
+        genex_interface.wait_for_genex_init(args.genex_path)
     )
     names = params.get("params_species", {}).get("names", [])
     params.get("params_species", {})["names"] = [name.strip() for name in names]

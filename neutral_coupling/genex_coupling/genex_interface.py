@@ -33,8 +33,9 @@ def wait_for_genex_init(genex_path, timeout=300, poll=3):
             # minimal sanity checks
             assert hasattr(grid, "r_u") and hasattr(grid, "z_u")
             genex_path = Path(genex_path)
-            r_all, z_all, not_compute = get_grid_with_ghost_filler(genex_path)
-            return grid, equi, params, norm, r_all, z_all, not_compute
+            r_all, z_all, compute = get_grid_with_ghost_filler(genex_path)
+            in_target = load_genex_in_target(genex_path)
+            return grid, equi, params, norm, r_all, z_all, compute, in_target
         except Exception as e:
             last_err = e
 
@@ -42,6 +43,14 @@ def wait_for_genex_init(genex_path, timeout=300, poll=3):
             raise TimeoutError(f"GENE-X init not ready: {last_err}")
 
         time.sleep(poll)
+
+
+def load_genex_in_target(genex_path, phi_index=0):
+    """Load the static target-cell mask in compute-point ordering."""
+    target = load_snaps_genex(genex_path, None, "in_target")
+    if "phi" in target.dims:
+        target = target.isel(phi=phi_index)
+    return np.asarray(target, dtype=bool).reshape(-1)
 
 def get_grid_with_ghost_filler(directory_path):
     grid_group = xr.open_dataset(
@@ -167,7 +176,7 @@ def _load_latest_genex_fields_once(gpath, all_spec, grid, equi, params, norm,
 
         NO_SPECIES = "N/A"
         EXPECTED_FIELDS = {"es_pot", "n", "u_par", "E_par", "E_perp", "pr",
-            "Q_par", "Q_perp", "Ttot", "u_phi", "u_rad", "q_es", "fnax", "fnay"
+            "Q_par", "Q_perp", "Ttot", "u_phi", "u_pol", "u_rad", "q_es", "fnax", "fnay"
         }
         VALID_SPECIES = set(spec) | {NO_SPECIES}
         out = defaultdict(dict)
@@ -242,6 +251,11 @@ def _load_latest_genex_fields_once(gpath, all_spec, grid, equi, params, norm,
                                                                 norm=norm, spec=s,
                                                                 component="radial")
                 set_field("u_phi", s, grid.matrix_to_vector(uvec.sel(vector='ePhi')))
+                u_r = uvec.sel(vector="eR")
+                u_z = uvec.sel(vector="eZ")
+                u_pol = np.sign(upar) * np.sqrt(u_r**2 + u_z**2)
+                u_pol.attrs["norm"] = get_field("u_par", s).attrs["norm"]
+                set_field("u_pol", s, grid.matrix_to_vector(u_pol))
 
                 target_norm = norm.c_s0.to("m/s")
                 exb_norm = radial_vExB.attrs["norm"].to("m/s")

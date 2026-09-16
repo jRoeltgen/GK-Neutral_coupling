@@ -23,6 +23,34 @@ These editable installs make `neutral_coupling` importable without modifying
 
 Backend-independent EIRENE modules are in `neutral_coupling/common`.
 
+## Boundary particle-flux conservation
+
+The GENE-X/EIRENE driver conserves outgoing ion particle flux by default on
+geometrically matched boundary-surface groups. Boundary components are derived
+from active-cell connectivity rather than hard-coded single-null names, so
+split SOLPS boundaries and differing component counts can be grouped. Use
+`--boundary-flux-normalization off` for legacy behavior; accepted correction
+factors default to 0.5--2 and can be changed with
+`--boundary-flux-factor-min` and `--boundary-flux-factor-max`. Each iteration
+archives `boundary_flux_normalization.json` with the pre/post totals and factors.
+The geometry match itself is constructed once and saved as
+`boundary_flux_mapping.json`. On restart, a changed `b2fgmtry` or GENE-X
+`mesh.nc` is fatal. Changes to EIRENE `fort.33/34/35` produce a warning and the
+mapping is reused: with fixed `b2fgmtry`, the triangular grid inside the plasma
+domain is expected to be fixed and only external neutral-region triangles may
+change.
+The mapping file includes matched and excluded face counts plus face-level
+geometry. If an EIRENE boundary cannot be covered, initialization fails after
+writing `boundary_flux_mapping_failure.json` with both meshes' candidate
+components for diagnosis.
+
+The generalized component logic has synthetic tests representing multiple
+topologies. A paired production-quality double-null GENE-X/EIRENE dataset is
+still required for future end-to-end validation of four-target identification,
+cut conventions, outward signs, and velocity-component selection. Until that
+fixture is available, double-null support should be regarded as generalized by
+construction rather than validated on production data.
+
 Tests and their fixtures are in `tests`.
 
 Backend implementations are in `neutral_coupling/genex_coupling` and

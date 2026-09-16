@@ -67,21 +67,26 @@ def mocked_io():
         yield mock_open
 
 @patch("neutral_coupling.genex_coupling.genex_interface.get_grid_with_ghost_filler")
+@patch("neutral_coupling.genex_coupling.genex_interface.load_genex_in_target")
 @patch("neutral_coupling.genex_coupling.genex_interface.initialize_genex_from_filepath")
-def test_wait_for_genex_init_immediate_success(mock_init, mock_grid_loader):
+def test_wait_for_genex_init_immediate_success(mock_init, mock_target_loader,
+                                               mock_grid_loader):
     mock_grid = SimpleNamespace(r_u=1, z_u=1)
     mock_init.return_value = (mock_grid, "equi", "params", "norm")
     mock_grid_loader.return_value = ("r_all", "z_all", "compute_mask")
+    mock_target_loader.return_value = "target_mask"
 
     result = wait_for_genex_init("path", timeout=1, poll=0)
 
     assert result == (mock_grid, "equi", "params", "norm", "r_all",
-                      "z_all", "compute_mask")
+                      "z_all", "compute_mask", "target_mask")
     mock_init.assert_called_once_with("path")
 
 @patch("neutral_coupling.genex_coupling.genex_interface.get_grid_with_ghost_filler")
+@patch("neutral_coupling.genex_coupling.genex_interface.load_genex_in_target")
 @patch("neutral_coupling.genex_coupling.genex_interface.initialize_genex_from_filepath")
-def test_wait_for_genex_init_retries_until_valid(mock_init, mock_grid_loader):
+def test_wait_for_genex_init_retries_until_valid(mock_init, mock_target_loader,
+                                                 mock_grid_loader):
     calls = {"n": 0}
 
     def fake_loader(path):
@@ -94,11 +99,34 @@ def test_wait_for_genex_init_retries_until_valid(mock_init, mock_grid_loader):
 
     mock_init.side_effect = fake_loader
     mock_grid_loader.return_value = ("r_all", "z_all", "compute_mask")
+    mock_target_loader.return_value = "target_mask"
 
     result = wait_for_genex_init("dummy_path", timeout=1, poll=0)
 
     assert result[0].r_u == 1
     assert calls["n"] == 3
+
+
+@patch("neutral_coupling.genex_coupling.genex_interface.get_grid_with_ghost_filler")
+@patch("neutral_coupling.genex_coupling.genex_interface.load_genex_in_target")
+@patch("neutral_coupling.genex_coupling.genex_interface.initialize_genex_from_filepath")
+def test_wait_for_genex_init_retries_until_target_mask_is_ready(
+    mock_init, mock_target_loader, mock_grid_loader,
+):
+    mock_grid = SimpleNamespace(r_u=1, z_u=1)
+    mock_init.return_value = (mock_grid, "equi", "params", "norm")
+    mock_grid_loader.return_value = ("r_all", "z_all", "compute_mask")
+    mock_target_loader.side_effect = [
+        OSError("group not found: parcon"),
+        np.array([False, True]),
+    ]
+
+    result = wait_for_genex_init("path", timeout=1, poll=0)
+
+    np.testing.assert_array_equal(result[-1], [False, True])
+    assert mock_init.call_count == 2
+    assert mock_grid_loader.call_count == 2
+    assert mock_target_loader.call_count == 2
 
 @pytest.mark.parametrize(
     "coord_names,phi_dim,rvals,zvals,ghost,filler,expected",

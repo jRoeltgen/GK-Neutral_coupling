@@ -8,6 +8,8 @@ from neutral_coupling.genex_coupling.genex_eirene_coupling import (interpolate_a
                                    prepare_genex_ion_temperatures,
                                    normalize_genex_params,
                                    backup_eirene_files,
+                                   geometry_fingerprints,
+                                   load_boundary_mapping,
                                    next_eirene_index,
                                    source_filename)
 import numpy as np
@@ -36,6 +38,9 @@ def coupling_env(monkeypatch, tmp_path):
         genex_read_attempts=6,
         genex_retry_delay=0.5,
         genex_retry_max_delay=10.0,
+        # This fixture tests the pre-existing coupling pipeline. Boundary
+        # normalization has focused tests in test_boundary_flux.py.
+        boundary_flux_normalization="off",
     )
 
     # ----------------------------
@@ -78,12 +83,10 @@ def coupling_env(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mod.genex_interface,
         "wait_for_genex_init",
-        MagicMock(return_value=(grid, None, params, norm, r_all, z_all, compute)),
-    )
-    monkeypatch.setattr(
-        mod,
-        "load_genex_in_target",
-        MagicMock(return_value=np.array([False])),
+        MagicMock(return_value=(
+            grid, None, params, norm, r_all, z_all, compute,
+            np.array([False]),
+        )),
     )
 
     monkeypatch.setattr(
@@ -187,6 +190,50 @@ def test_main_single_iteration_success(coupling_env):
     )
     env["deps"].replace.assert_called_once()
     assert (env["args"].eirene_path / "eirene_sources_000000" / "fort.31").exists()
+
+
+def test_restart_mapping_fails_for_changed_b2fgmtry(tmp_path, monkeypatch):
+    for name, contents in (
+        ("b2fgmtry", "geometry"), ("fort.33", "triangles"),
+        ("fort.34", "neighbors"), ("fort.35", "sides"),
+        ("mesh.nc", "genex"),
+    ):
+        (tmp_path / name).write_text(contents)
+    from neutral_coupling.genex_coupling import genex_eirene_coupling as mod
+    monkeypatch.setattr(mod.genex_interface, "filepath_resolver",
+                        lambda *_: tmp_path / "mesh.nc")
+    fingerprints = geometry_fingerprints(tmp_path, tmp_path)
+    path = tmp_path / "boundary_flux_mapping.json"
+    path.write_text(__import__("json").dumps({
+        "version": 8, "fingerprints": fingerprints,
+        "groups": [], "mapping_report": {},
+    }))
+    (tmp_path / "b2fgmtry").write_text("changed")
+    with pytest.raises(RuntimeError, match="b2fgmtry"):
+        load_boundary_mapping(
+            path, geometry_fingerprints(tmp_path, tmp_path)
+        )
+
+
+def test_restart_mapping_only_warns_for_changed_triangles(tmp_path, monkeypatch):
+    for name in ("b2fgmtry", "fort.33", "fort.34", "fort.35", "mesh.nc"):
+        (tmp_path / name).write_text(name)
+    from neutral_coupling.genex_coupling import genex_eirene_coupling as mod
+    monkeypatch.setattr(mod.genex_interface, "filepath_resolver",
+                        lambda *_: tmp_path / "mesh.nc")
+    fingerprints = geometry_fingerprints(tmp_path, tmp_path)
+    path = tmp_path / "boundary_flux_mapping.json"
+    path.write_text(__import__("json").dumps({
+        "version": 8, "fingerprints": fingerprints,
+        "groups": [], "mapping_report": {},
+    }))
+    (tmp_path / "fort.33").write_text("outside-domain change")
+    report_path = tmp_path / "boundary_flux_report.txt"
+    assert load_boundary_mapping(
+        path, geometry_fingerprints(tmp_path, tmp_path),
+        report_path=report_path,
+    ) is not None
+    assert "triangular mesh" in report_path.read_text()
 
 def test_main_timeout_raises_without_archiving(coupling_env):
     env = coupling_env
