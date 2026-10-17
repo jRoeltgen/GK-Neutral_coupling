@@ -194,6 +194,59 @@ def test_normalization_scales_only_outgoing_values_per_species():
     )
 
 
+def test_radial_scaling_multiplies_normalization_factor():
+    fort31 = {"fnax": np.zeros((1, 2)),
+              "fnay": np.array([[2.0, -4.0]])}
+    eirene = [component("e", "radial", [[0, 0], [0, 1]], 1,
+                        [[1, 0], [1, 1]])]
+    genex = [component("g", "radial", [[0, 0], [0, 1]], 1,
+                       [[1, 0], [1, 1]])]
+    native = {"poloidal": np.zeros((1, 1)),
+              "radial": np.array([[3.0, -4.0]])}
+
+    records = normalize_eirene_particle_fluxes(
+        fort31, eirene, native, genex, [([0], [0])], ["D"],
+        radial_flux_scaling=2.0,
+    )
+
+    # Normalization contributes 3/2 and radial scaling contributes 2.
+    np.testing.assert_allclose(fort31["fnay"], [[6.0, -8.0]])
+    assert records[0]["factor"] == pytest.approx(1.5)
+    assert records[0]["radial_flux_scaling"] == 2.0
+
+
+def test_radial_scaling_applies_when_no_outgoing_flux():
+    fort31 = {"fnax": np.zeros((1, 1)), "fnay": np.array([[-4.0]])}
+    eirene = [component("e", "radial", [[0, 0]], 1, [[1, 0]])]
+    genex = [component("g", "radial", [[0, 0]], 1, [[1, 0]])]
+    native = {"poloidal": np.zeros((1, 1)),
+              "radial": np.array([[-3.0]])}
+
+    records = normalize_eirene_particle_fluxes(
+        fort31, eirene, native, genex, [([0], [0])], ["D"],
+        radial_flux_scaling=0.25,
+    )
+
+    assert fort31["fnay"][0, 0] == pytest.approx(-1.0)
+    assert records[0]["factor"] == 1.0
+    assert "normalization skipped" in records[0]["warning"]
+
+
+def test_radial_scaling_does_not_change_poloidal_flux():
+    fort31 = {"fnax": np.array([[2.0]]), "fnay": np.zeros((1, 1))}
+    eirene = [component("e", "poloidal", [[0, 0]], 1, [[1, 0]])]
+    genex = [component("g", "poloidal", [[0, 0]], 1, [[1, 0]])]
+    native = {"poloidal": np.array([[3.0]]),
+              "radial": np.zeros((1, 1))}
+
+    normalize_eirene_particle_fluxes(
+        fort31, eirene, native, genex, [([0], [0])], ["D"],
+        radial_flux_scaling=2.0,
+    )
+
+    assert fort31["fnax"][0, 0] == pytest.approx(3.0)
+
+
 def test_normalization_rejects_implausible_factor():
     eirene = [component("e", "radial", [[0, 0]], 1, [[1, 0]])]
     genex = [component("g", "radial", [[0, 0]], 1, [[1, 0]])]

@@ -33,6 +33,8 @@ split SOLPS boundaries and differing component counts can be grouped. Use
 factors default to 0.5--2 and can be changed with
 `--boundary-flux-factor-min` and `--boundary-flux-factor-max`. Each iteration
 archives `boundary_flux_normalization.json` with the pre/post totals and factors.
+Use `--radial-flux-scaling` to apply an additional multiplier to radial fluxes;
+it defaults to 1 (no additional scaling) and multiplies the normalization factor.
 The geometry match itself is constructed once and saved as
 `boundary_flux_mapping.json`. On restart, a changed `b2fgmtry` or GENE-X
 `mesh.nc` is fatal. Changes to EIRENE `fort.33/34/35` produce a warning and the

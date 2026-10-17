@@ -696,8 +696,11 @@ def outgoing_rate(values, components):
 def normalize_eirene_particle_fluxes(
     fort31, eirene_components, genex_fluxes, genex_components, groups,
     species_names, *, factor_min=.5, factor_max=2.0,
+    radial_flux_scaling=1.0,
 ):
-    """Conserve outgoing rate for each species and matched surface group."""
+    """Conserve outgoing rates, with an optional extra radial-flux scaling."""
+    if not np.isfinite(radial_flux_scaling) or radial_flux_scaling < 0.0:
+        raise ValueError("radial_flux_scaling must be finite and non-negative")
     records = []
     for species_index, species in enumerate(species_names):
         native = {
@@ -741,18 +744,18 @@ def normalize_eirene_particle_fluxes(
                 )[tuple(c.indices.T)] == 0) for c in ecs)
                 if g_total != 0.0 and all_zero:
                     raise ValueError(f"EIRENE boundary is entirely zero: {record}")
-                record.update(factor=1.0, eirene_after=e_total,
-                              eirene_outward_after=e_total,
-                              eirene_net_after=e_net,
-                              warning="no outgoing EIRENE flux; component skipped")
-                records.append(record)
-                continue
-            factor = g_total / e_total
-            if not np.isfinite(factor) or not factor_min <= factor <= factor_max:
-                raise ValueError(
-                    f"boundary factor {factor:.6g} outside "
-                    f"[{factor_min}, {factor_max}]: {record}"
+                factor = 1.0
+                record["warning"] = (
+                    "no outgoing EIRENE flux; normalization skipped"
                 )
+            else:
+                factor = g_total / e_total
+                if (not np.isfinite(factor)
+                        or not factor_min <= factor <= factor_max):
+                    raise ValueError(
+                        f"boundary factor {factor:.6g} outside "
+                        f"[{factor_min}, {factor_max}]: {record}"
+                    )
             for component in ecs:
                 key = "fnax" if component.kind == "poloidal" else "fnay"
                 view = _species_view(fort31[key], species_index)
@@ -760,13 +763,17 @@ def normalize_eirene_particle_fluxes(
                 local = view[index]
                 outward = component.sign * local > 0
                 local[outward] *= factor
+                if component.kind == "radial":
+                    local *= radial_flux_scaling
                 view[index] = local
             after_rates = np.sum([directional_rates(
                 _species_view(fort31["fnax" if c.kind == "poloidal" else "fnay"],
                               species_index), [c]
             ) for c in ecs], axis=0)
             after, _, net_after = (float(value) for value in after_rates)
-            record.update(factor=factor, eirene_after=after,
+            record.update(factor=factor,
+                          radial_flux_scaling=radial_flux_scaling,
+                          eirene_after=after,
                           eirene_outward_after=after,
                           eirene_net_after=net_after)
             records.append(record)

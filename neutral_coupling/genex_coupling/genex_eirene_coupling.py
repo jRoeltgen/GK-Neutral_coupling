@@ -219,6 +219,7 @@ def main(args, deps=None):
                 edat.species_names["bulk_ions"],
                 factor_min=getattr(args, "boundary_flux_factor_min", .5),
                 factor_max=getattr(args, "boundary_flux_factor_max", 2.0),
+                radial_flux_scaling=getattr(args, "radial_flux_scaling", 1.0),
             )
             write_boundary_normalization_report(
                 normalization_records, index, tau, boundary_report_path
@@ -936,11 +937,18 @@ def cli():
         "--boundary-flux-factor-max", type=float, default=2.0,
         help="Largest accepted boundary normalization factor.",
     )
+    parser.add_argument(
+        "--radial-flux-scaling", type=float, default=1.0,
+        help="Additional multiplier for normalized radial boundary fluxes "
+             "(default: 1, no additional scaling).",
+    )
     args = parser.parse_args()
     if args.boundary_flux_factor_min <= 0:
         parser.error("--boundary-flux-factor-min must be positive")
     if args.boundary_flux_factor_max < args.boundary_flux_factor_min:
         parser.error("boundary flux factor maximum must be >= minimum")
+    if not np.isfinite(args.radial_flux_scaling) or args.radial_flux_scaling < 0:
+        parser.error("--radial-flux-scaling must be finite and non-negative")
     main(args)
 
 
