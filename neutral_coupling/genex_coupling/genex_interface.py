@@ -33,9 +33,12 @@ def wait_for_genex_init(genex_path, timeout=300, poll=3):
             # minimal sanity checks
             assert hasattr(grid, "r_u") and hasattr(grid, "z_u")
             genex_path = Path(genex_path)
-            r_all, z_all, compute = get_grid_with_ghost_filler(genex_path)
+            r_all, z_all, compute, buf_zone = get_grid_with_ghost_filler(
+                genex_path
+            )
             in_target = load_genex_in_target(genex_path)
-            return grid, equi, params, norm, r_all, z_all, compute, in_target
+            return (grid, equi, params, norm, r_all, z_all, compute,
+                    in_target, buf_zone)
         except Exception as e:
             last_err = e
 
@@ -76,13 +79,14 @@ def get_grid_with_ghost_filler(directory_path):
 
     not_ghost = grid_group["not_ghost"].isel({phi_string: 0})
     not_filler = grid_group["not_filler"].isel({phi_string: 0})
+    buf_zone = grid_group["buf_zone"].isel({phi_string: 0})
 
     compute = (not_ghost.astype(bool)) & (not_filler.astype(bool))
 
     x_unstructured = grid_group[R_str].isel({phi_string: 0})
     y_unstructured = grid_group[Z_str].isel({phi_string: 0})
 
-    return x_unstructured, y_unstructured, compute
+    return x_unstructured, y_unstructured, compute, buf_zone
 
 def get_genex_species(params):
     names = params['params_species']['names']

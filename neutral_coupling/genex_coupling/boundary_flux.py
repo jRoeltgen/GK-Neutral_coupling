@@ -580,6 +580,11 @@ def map_boundary_cell_sequences(eirene, genex, *, distance_tolerance=None):
             spacings.extend(np.linalg.norm(
                 np.diff(component.centres, axis=0), axis=1
             ))
+    # TODO: Calculate resolution scales independently for EIRENE and GENE-X
+    # (preferably locally along each matched surface) so the more finely
+    # sampled boundary cannot dominate the pooled median. Replace the very
+    # permissive span-based fallback with a tighter physical limit that
+    # accounts for the expected GENE-X buffer-width displacement.
     if distance_tolerance is None:
         distance_tolerance = 3 * np.median(spacings) if spacings else 1e-9
     spans = [np.ptp(component.centres, axis=0).max()

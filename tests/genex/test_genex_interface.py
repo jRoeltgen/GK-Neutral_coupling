@@ -73,13 +73,15 @@ def test_wait_for_genex_init_immediate_success(mock_init, mock_target_loader,
                                                mock_grid_loader):
     mock_grid = SimpleNamespace(r_u=1, z_u=1)
     mock_init.return_value = (mock_grid, "equi", "params", "norm")
-    mock_grid_loader.return_value = ("r_all", "z_all", "compute_mask")
+    mock_grid_loader.return_value = (
+        "r_all", "z_all", "compute_mask", "buf_zone"
+    )
     mock_target_loader.return_value = "target_mask"
 
     result = wait_for_genex_init("path", timeout=1, poll=0)
 
     assert result == (mock_grid, "equi", "params", "norm", "r_all",
-                      "z_all", "compute_mask", "target_mask")
+                      "z_all", "compute_mask", "target_mask", "buf_zone")
     mock_init.assert_called_once_with("path")
 
 @patch("neutral_coupling.genex_coupling.genex_interface.get_grid_with_ghost_filler")
@@ -98,7 +100,9 @@ def test_wait_for_genex_init_retries_until_valid(mock_init, mock_target_loader,
         return mock_grid, "equi", "params", "norm"
 
     mock_init.side_effect = fake_loader
-    mock_grid_loader.return_value = ("r_all", "z_all", "compute_mask")
+    mock_grid_loader.return_value = (
+        "r_all", "z_all", "compute_mask", "buf_zone"
+    )
     mock_target_loader.return_value = "target_mask"
 
     result = wait_for_genex_init("dummy_path", timeout=1, poll=0)
@@ -115,7 +119,9 @@ def test_wait_for_genex_init_retries_until_target_mask_is_ready(
 ):
     mock_grid = SimpleNamespace(r_u=1, z_u=1)
     mock_init.return_value = (mock_grid, "equi", "params", "norm")
-    mock_grid_loader.return_value = ("r_all", "z_all", "compute_mask")
+    mock_grid_loader.return_value = (
+        "r_all", "z_all", "compute_mask", "buf_zone"
+    )
     mock_target_loader.side_effect = [
         OSError("group not found: parcon"),
         np.array([False, True]),
@@ -123,13 +129,13 @@ def test_wait_for_genex_init_retries_until_target_mask_is_ready(
 
     result = wait_for_genex_init("path", timeout=1, poll=0)
 
-    np.testing.assert_array_equal(result[-1], [False, True])
+    np.testing.assert_array_equal(result[-2], [False, True])
     assert mock_init.call_count == 2
     assert mock_grid_loader.call_count == 2
     assert mock_target_loader.call_count == 2
 
 @pytest.mark.parametrize(
-    "coord_names,phi_dim,rvals,zvals,ghost,filler,expected",
+    "coord_names,phi_dim,rvals,zvals,ghost,filler,buf_zone,expected",
     [
         (
             ("R", "Z"),
@@ -138,6 +144,7 @@ def test_wait_for_genex_init_retries_until_target_mask_is_ready(
             [4,5,6],
             [1,0,1],
             [1,1,0],
+            [0,2,0],
             [True,False,False],
         ),
         (
@@ -147,6 +154,7 @@ def test_wait_for_genex_init_retries_until_target_mask_is_ready(
             [30,40],
             [1,1],
             [1,0],
+            [0,4],
             [True,False],
         ),
         (
@@ -156,6 +164,7 @@ def test_wait_for_genex_init_retries_until_target_mask_is_ready(
             [9,10],
             [1,1],
             [1,1],
+            [3,0],
             [True,True],
         ),
     ]
@@ -168,6 +177,7 @@ def test_get_grid_valid_cases(
     zvals,
     ghost,
     filler,
+    buf_zone,
     expected,
 ):
     rname, zname = coord_names
@@ -177,15 +187,17 @@ def test_get_grid_valid_cases(
         zname: ((phi_dim, "n"), [zvals]),
         "not_ghost": ((phi_dim, "n"), [ghost]),
         "not_filler": ((phi_dim, "n"), [filler]),
+        "buf_zone": ((phi_dim, "n"), [buf_zone]),
     })
 
     mocked_io.return_value = ds
 
-    r, z, compute = get_grid_with_ghost_filler(Path("dummy"))
+    r, z, compute, loaded_buf_zone = get_grid_with_ghost_filler(Path("dummy"))
 
     assert (r.values == rvals).all()
     assert (z.values == zvals).all()
     assert (compute.values == expected).all()
+    assert (loaded_buf_zone.values == buf_zone).all()
 
 def test_get_grid_unknown_dimension(mocked_io):
     ds = xr.Dataset({
@@ -193,6 +205,7 @@ def test_get_grid_unknown_dimension(mocked_io):
         "Z": (("foo", "n"), [[3,4]]),
         "not_ghost": (("foo", "n"), [[1,1]]),
         "not_filler": (("foo", "n"), [[1,1]]),
+        "buf_zone": (("foo", "n"), [[0,0]]),
     })
 
     mocked_io.return_value = ds

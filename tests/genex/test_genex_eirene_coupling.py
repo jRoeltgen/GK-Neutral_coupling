@@ -2,9 +2,11 @@ import pytest
 from unittest.mock import MagicMock
 from types import SimpleNamespace
 from neutral_coupling.genex_coupling.genex_eirene_coupling import (interpolate_all_moments,
+                                   BOUNDARY_MAPPING_VERSION,
                                    check_species_consistency,
                                    interpolate_all_sources_wrapper,
                                    interpolate_temperature_values,
+                                   make_in_plasma_mask,
                                    prepare_genex_ion_temperatures,
                                    normalize_genex_params,
                                    backup_eirene_files,
@@ -85,7 +87,7 @@ def coupling_env(monkeypatch, tmp_path):
         "wait_for_genex_init",
         MagicMock(return_value=(
             grid, None, params, norm, r_all, z_all, compute,
-            np.array([False]),
+            np.array([False]), np.array([0]),
         )),
     )
 
@@ -109,7 +111,6 @@ def coupling_env(monkeypatch, tmp_path):
         "es_pot": {"N/A": xr.DataArray([1.0], dims=("RZ",), attrs={"norm": 1.0})},
         "Ttot": {"D": xr.DataArray([4.0], dims=("RZ",), attrs={"norm": 1.0})},
     }
-
     monkeypatch.setattr(
         mod.genex_interface,
         "load_latest_genex_fields",
@@ -174,6 +175,31 @@ def coupling_env(monkeypatch, tmp_path):
         "make_es_pot": make_es_pot,
     }
 
+
+def test_make_in_plasma_mask_excludes_targets_and_all_buffer_types():
+    active = np.array([True, True, True, True, True, False])
+    in_target = np.array([False, True, False, False, False])
+    buf_zone = np.array([0, 0, 1, 3, 4, 0])
+
+    in_plasma, field_mask = make_in_plasma_mask(
+        active, in_target, buf_zone
+    )
+
+    np.testing.assert_array_equal(
+        field_mask, [True, False, False, False, False]
+    )
+    np.testing.assert_array_equal(
+        in_plasma, [True, False, False, False, False, False]
+    )
+
+
+def test_make_in_plasma_mask_rejects_full_grid_size_mismatch():
+    with pytest.raises(ValueError, match="buf_zone size"):
+        make_in_plasma_mask(
+            np.array([True, True]), np.array([False, False]), np.array([0])
+        )
+
+
 def test_main_single_iteration_success(coupling_env):
     env = coupling_env
 
@@ -205,7 +231,7 @@ def test_restart_mapping_fails_for_changed_b2fgmtry(tmp_path, monkeypatch):
     fingerprints = geometry_fingerprints(tmp_path, tmp_path)
     path = tmp_path / "boundary_flux_mapping.json"
     path.write_text(__import__("json").dumps({
-        "version": 8, "fingerprints": fingerprints,
+        "version": BOUNDARY_MAPPING_VERSION, "fingerprints": fingerprints,
         "groups": [], "mapping_report": {},
     }))
     (tmp_path / "b2fgmtry").write_text("changed")
@@ -224,7 +250,7 @@ def test_restart_mapping_only_warns_for_changed_triangles(tmp_path, monkeypatch)
     fingerprints = geometry_fingerprints(tmp_path, tmp_path)
     path = tmp_path / "boundary_flux_mapping.json"
     path.write_text(__import__("json").dumps({
-        "version": 8, "fingerprints": fingerprints,
+        "version": BOUNDARY_MAPPING_VERSION, "fingerprints": fingerprints,
         "groups": [], "mapping_report": {},
     }))
     (tmp_path / "fort.33").write_text("outside-domain change")

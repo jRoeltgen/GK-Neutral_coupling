@@ -78,7 +78,7 @@ def main(args, deps=None):
     genex_path = Path(args.genex_path)
     # Load static in time data
     edat, b2dat, pol_mask, rad_mask = eirene_interface(eirene_path, eirene_path)
-    grid, equi, params, norm, r_all, z_all, compute, in_target = (
+    grid, equi, params, norm, r_all, z_all, compute, in_target, buf_zone = (
         genex_interface.wait_for_genex_init(genex_path)
     )
     params = normalize_genex_params(params)
@@ -88,7 +88,12 @@ def main(args, deps=None):
     grid_r = np.asarray(r_all*norm["R0"])
     # TODO: Need to change this negative to function of grid._flipped_z and equi._flipped_Z
     grid_z = np.asarray(z_all*norm["R0"])
-    in_plasma, plasma_field_mask = make_in_plasma_mask(compute, in_target)
+    in_plasma, plasma_field_mask = make_in_plasma_mask(
+        compute, in_target, buf_zone
+    )
+    buf_zone_on_compute = np.asarray(buf_zone).reshape(-1)[
+        np.asarray(compute, dtype=bool)
+    ]
     if params["params_time_loop"]["start_from_checkpoint"]:
         index = next_eirene_index(eirene_path, args.filepattern)
     else:
@@ -165,7 +170,7 @@ def main(args, deps=None):
         normalization_records = None
         if boundary_mode == "surface":
             native_fluxes, current_boundary = prepare_native_boundary_fluxes(
-                grid, compute, in_target, genex_fields_2D,
+                grid, compute, in_target, buf_zone_on_compute, genex_fields_2D,
                 edat.species_names["bulk_ions"],
                 length_scale=norm["R0"],
             )
@@ -304,14 +309,14 @@ def main(args, deps=None):
                 temps,
                 grid_r,
                 grid_z,
-                compute,
+                in_plasma,
                 direct_values=direct_ion_temperatures,
             )
             write_temperatures = True
 
         interp_sources = interpolate_all_sources_wrapper(
             edat.triangle_mesh, sources,
-            grid_r, grid_z, compute,
+            grid_r, grid_z, in_plasma,
             genex_electrons=genex_electrons,
         )
 
@@ -356,16 +361,20 @@ def unnormalize_all(genex_out):
             genex_out[field][species] = genex_interface.unnormalize(value)
 
 
-def make_in_plasma_mask(compute, in_target):
-    """Return full-grid and compute-relative masks excluding target cells."""
+def make_in_plasma_mask(compute, in_target, buf_zone):
+    """Return full-grid and active-relative masks for unmodified plasma."""
     compute = np.asarray(compute, dtype=bool)
     target_on_compute = np.asarray(in_target, dtype=bool).reshape(-1)
+    buf_zone = np.asarray(buf_zone).reshape(-1)
+    if buf_zone.size != compute.size:
+        raise ValueError("buf_zone size does not match the full GENE-X grid")
     if target_on_compute.size != np.count_nonzero(compute):
         raise ValueError(
             "in_target size does not match the number of GENE-X compute cells"
         )
-    plasma_field_mask = ~target_on_compute
-    in_plasma = compute.copy()
+    buffer_on_compute = buf_zone[compute] != 0
+    plasma_field_mask = ~target_on_compute & ~buffer_on_compute
+    in_plasma = np.zeros_like(compute)
     in_plasma[compute] = plasma_field_mask
     return in_plasma, plasma_field_mask
 
@@ -394,11 +403,17 @@ def _grid_coordinate_matrices(grid, shape):
     return rr, zz
 
 
-def prepare_native_boundary_fluxes(grid, compute, in_target, fields,
+def prepare_native_boundary_fluxes(grid, compute, in_target,
+                                   buf_zone_on_compute, fields,
                                    species_names, *, length_scale=1.0):
     """Build native GENE-X boundary components and n*u flux matrices."""
-    if np.asarray(in_target).size != np.count_nonzero(np.asarray(compute)):
+    n_compute = np.count_nonzero(np.asarray(compute))
+    if np.asarray(in_target).size != n_compute:
         raise ValueError("GENE-X target mask does not match the compute mask")
+    if np.asarray(buf_zone_on_compute).size != n_compute:
+        raise ValueError(
+            "GENE-X buffer-zone mask does not match the compute mask"
+        )
     if not species_names:
         raise ValueError("boundary normalization requires at least one ion")
     first = species_names[0]
@@ -416,16 +431,26 @@ def prepare_native_boundary_fluxes(grid, compute, in_target, fields,
     if target_matrix.shape != density0.shape:
         raise ValueError("GENE-X target mask does not match native field matrix")
     target_matrix = np.isfinite(target_matrix) & (target_matrix != 0)
-    # Build topology from static compute/target masks. Density can legitimately
-    # be zero at startup and must not change the saved geometry mapping.
+    buffer_matrix = _grid_matrix(
+        grid, np.asarray(buf_zone_on_compute, dtype=float)
+    )
+    if buffer_matrix.shape != density0.shape:
+        raise ValueError("GENE-X buffer zones do not match native field matrix")
+    # Build topology from static compute, target, and buffer-zone masks.
+    # Density can legitimately be zero at startup and must not change the
+    # saved geometry mapping.
     compute_matrix = _grid_matrix(
-        grid, np.ones(np.count_nonzero(np.asarray(compute)), dtype=float)
+        grid, np.ones(n_compute, dtype=float)
     )
     if compute_matrix.shape != density0.shape:
         raise ValueError("GENE-X compute mask does not match native field matrix")
-    active = np.isfinite(compute_matrix) & ~target_matrix
+    active = (
+        np.isfinite(compute_matrix)
+        & ~target_matrix
+        & (buffer_matrix == 0)
+    )
     components = structured_boundary_components(
-        active, rr, zz, target=target_matrix, prefix="genex"
+        active, rr, zz, target=(buffer_matrix == 4), prefix="genex"
     )
 
     fluxes = {}
@@ -477,7 +502,7 @@ def write_boundary_normalization_report(records, iteration, tau, path):
     _append_boundary_report(path, lines)
 
 
-BOUNDARY_MAPPING_VERSION = 8
+BOUNDARY_MAPPING_VERSION = 9
 
 
 def _file_fingerprint(path):
