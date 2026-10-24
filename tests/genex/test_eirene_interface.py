@@ -8,6 +8,7 @@ from neutral_coupling.genex_coupling.eirene_interface import (
     get_temperatures,
     map_ion_temperatures_to_triangles,
     prepare_fort31,
+    normalized_sheath_potential_drop,
     dict_to_array,
     run_eirene,
     status,
@@ -27,12 +28,15 @@ def fake_b2_path(tmp_path):
 @patch("neutral_coupling.genex_coupling.eirene_interface.triangle_mesh.triangle_mesh")
 @patch("neutral_coupling.genex_coupling.eirene_interface.B2IO.B2")
 @patch("neutral_coupling.genex_coupling.eirene_interface.eireneIO.eirene")
-def test_eirene_interface(mock_eirene_class, mock_b2_class,
+@patch("neutral_coupling.genex_coupling.eirene_interface.build_fort31")
+def test_eirene_interface(mock_build_fort31, mock_eirene_class, mock_b2_class,
                           mock_mesh_class, mock_parser_class,
                           tmp_path):
 
     eirene_path = tmp_path
     b2_path = tmp_path
+    # Legacy templates are deliberately ignored; only runtime fort.31 is read.
+    (eirene_path / "fort.31.template").touch()
 
     # ---- Mocks ----
     fake_eirene = MagicMock()
@@ -51,6 +55,7 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
         "fnax": np.array([[0.0, 1.0], [0.0, 2.0]]),
         "fnay": np.array([[1.0, 0.0], [0.0, 2.0]]),
     }
+    mock_build_fort31.return_value.fort31 = fake_eirene.fort31
 
     # Species parsing determines ns
     fake_parser.species = {"bulk_ions": ["D", "T", "He"]}  # ns = 3
@@ -72,12 +77,11 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
 
     # File reads
     fake_eirene.read_ft30.assert_called_once_with(eirene_path / "fort.30")
-    fake_eirene.read_ft31.assert_called_once_with(
-        eirene_path / "fort.31", fake_eirene.plasma_gmtry["nx"]+2,
-        fake_eirene.plasma_gmtry["ny"]+2, len(fake_parser.species["bulk_ions"])
-    )
-    fake_eirene.write_ft31.assert_called_once_with(
-        eirene_path / "fort.31.template"
+    fake_eirene.read_ft31.assert_not_called()
+    mock_build_fort31.assert_called_once_with(
+        eirene_path / "input.dat",
+        b2_path / "b2fgmtry",
+        eirene_path / "fort.30",
     )
 
     # B2 init
@@ -95,12 +99,12 @@ def test_eirene_interface(mock_eirene_class, mock_b2_class,
 @patch("neutral_coupling.genex_coupling.eirene_interface.triangle_mesh.triangle_mesh")
 @patch("neutral_coupling.genex_coupling.eirene_interface.B2IO.B2")
 @patch("neutral_coupling.genex_coupling.eirene_interface.eireneIO.eirene")
-def test_eirene_interface_prefers_existing_fort31_template(
+def test_eirene_interface_reuses_existing_runtime_fort31(
     mock_eirene_class, mock_b2_class, mock_mesh_class, mock_parser_class,
     tmp_path,
 ):
-    template = tmp_path / "fort.31.template"
-    template.touch()
+    runtime = tmp_path / "fort.31"
+    runtime.touch()
     fake_eirene = mock_eirene_class.return_value
     fake_eirene.plasma_gmtry = {"nx": 2, "ny": 3}
     fake_eirene.fort31 = {
@@ -113,7 +117,7 @@ def test_eirene_interface_prefers_existing_fort31_template(
 
     eirene_interface(tmp_path, tmp_path)
 
-    fake_eirene.read_ft31.assert_called_once_with(template, 4, 5, 1)
+    fake_eirene.read_ft31.assert_called_once_with(runtime, 4, 5, 1)
     fake_eirene.write_ft31.assert_not_called()
 
 
@@ -300,6 +304,10 @@ def test_prepare_fort31_3D():
         "pr": np.zeros((nx, ny)),
         "fhex": np.zeros((nx, ny)),
         "fhix": np.zeros((nx, ny)),
+        "fhey": np.zeros((nx, ny)),
+        "fhiy": np.zeros((nx, ny)),
+        "delta_sheathxb": np.zeros((nx, ny)),
+        "delta_sheathyb": np.zeros((nx, ny)),
         "vv": np.zeros((nx, ny, ni)),   # needed
         "up": np.zeros((nx, ny, ni)),   # needed
     }
@@ -366,6 +374,10 @@ def test_prepare_fort31_2D():
         "pr": np.zeros((nx, ny)),
         "fhex": np.zeros((nx, ny)),
         "fhix": np.zeros((nx, ny)),
+        "fhey": np.zeros((nx, ny)),
+        "fhiy": np.zeros((nx, ny)),
+        "delta_sheathxb": np.zeros((nx, ny)),
+        "delta_sheathyb": np.zeros((nx, ny)),
         "vv": np.zeros((nx, ny)),
         "up": np.zeros((nx, ny)),
     }
@@ -385,7 +397,9 @@ def test_prepare_fort31_2D():
         "Q_par": {"electrons": np.ones((nx,ny)), "D": np.ones((nx, ny))}
     }
 
-    prepare_fort31(edat, genex_data, ["electrons"], ["D"])
+    prepare_fort31(
+        edat, genex_data, ["electrons"], ["D"], phi_wall=0.25
+    )
 
     # ---- Assertions ----
 
@@ -406,6 +420,51 @@ def test_prepare_fort31_2D():
 
     # Heat flux shape sanity
     assert edat.fort31["fhix"].shape == (nx, ny)
+    np.testing.assert_allclose(edat.fort31["delta_sheathxb"], 0.75)
+    np.testing.assert_allclose(edat.fort31["delta_sheathyb"], 0.75)
+
+
+def test_normalized_sheath_potential_drop_and_replaceable_model():
+    phi = np.array([[3.0, 5.0, 7.0]])
+    te = np.array([[2.0, 4.0, 0.0]]) * 1.602176634e-19
+    result = normalized_sheath_potential_drop(phi, te, phi_wall=1.0)
+    np.testing.assert_allclose(result, [[1.0, 1.0, 0.0]])
+
+    edat = MagicMock()
+    shape = (2, 3)
+    edat.fort31 = {
+        "ua": np.zeros(shape), "bb": np.ones((*shape, 1)),
+        "na": np.zeros(shape), "ww": np.zeros(shape),
+        "te": np.zeros(shape), "ti": np.zeros(shape),
+        "fnax": np.zeros(shape), "fnay": np.zeros(shape),
+        "uadia": np.zeros(shape), "vadia": np.zeros(shape),
+        "po": np.zeros(shape), "pr": np.zeros(shape),
+        "fhex": np.zeros(shape), "fhix": np.zeros(shape),
+        "fhey": np.zeros(shape), "fhiy": np.zeros(shape),
+        "delta_sheathxb": np.zeros(shape),
+        "delta_sheathyb": np.zeros(shape),
+        "vv": np.zeros(shape), "up": np.zeros(shape),
+    }
+    ones = np.ones(shape)
+    data = {
+        "n": {"D": ones}, "u_par": {"D": ones},
+        "u_rad": {"D": ones}, "u_phi": {"D": ones},
+        "Ttot": {"electrons": ones, "D": ones},
+        "es_pot": {"scalar": ones}, "pr": {"scalar": ones},
+        "fnax": {"D": ones}, "fnay": {"D": ones},
+        "Q_par": {"electrons": ones, "D": ones},
+    }
+
+    def constant_model(phi, te, phi_wall):
+        assert phi_wall == 4.0
+        return np.full_like(phi, 9.0)
+
+    prepare_fort31(
+        edat, data, ["electrons"], ["D"],
+        phi_wall=4.0, sheath_model=constant_model,
+    )
+    np.testing.assert_array_equal(edat.fort31["delta_sheathxb"], 9.0)
+    np.testing.assert_array_equal(edat.fort31["delta_sheathyb"], 9.0)
 
 def test_dict_to_array_ordering():
     data = {

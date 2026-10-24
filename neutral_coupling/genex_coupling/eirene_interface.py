@@ -2,6 +2,7 @@ from neutral_coupling.common import eirene_io as eireneIO
 from neutral_coupling.common import b2_io as B2IO
 from neutral_coupling.common import triangle_mesh
 from neutral_coupling.common.eirene_input_parser import EireneInputParser
+from neutral_coupling.utility.create_fort31 import build_fort31
 from pathlib import Path
 import scipy.constants as pyconst
 from scipy.interpolate import LinearNDInterpolator
@@ -44,20 +45,19 @@ def eirene_interface(eirene_path, b2_path):
     nx = edat.plasma_gmtry["nx"]
     ny = edat.plasma_gmtry["ny"]
 
-    fort31_template = eirene_path / Path("fort.31.template")
     fort31_runtime = eirene_path / Path("fort.31")
-    bootstrap_template = not fort31_template.is_file()
-    fort31_initial = fort31_runtime if bootstrap_template else fort31_template
-
-    edat.read_ft31(fort31_initial, nx+2, ny+2, ns)
-    if bootstrap_template:
-        # Capture the initial mask and fields before the mutable runtime file is
-        # overwritten by later coupling iterations. Future starts consistently
-        # initialize from this colocated template.
-        edat.write_ft31(fort31_template)
+    if fort31_runtime.is_file():
+        edat.read_ft31(fort31_runtime, nx+2, ny+2, ns)
+    else:
+        skeleton = build_fort31(
+            eirene_path / "input.dat",
+            Path(b2_path) / "b2fgmtry",
+            eirene_path / "fort.30",
+        )
+        edat.fort31 = skeleton.fort31
         print(
-            f"Created EIRENE fort.31 template from fallback {fort31_runtime}: "
-            f"{fort31_template}",
+            "Initialized EIRENE fort.31 skeleton from input.dat, b2fgmtry, "
+            "and fort.30",
             flush=True,
         )
     if edat.fort31["fnax"].ndim == 3:
@@ -193,8 +193,38 @@ def get_temperatures(
 
     return temperatures
 
-def prepare_fort31(edat, genex_data, eorder, iorder):
-    """Fill fort31 dictionary with gene-x data"""
+def normalized_sheath_potential_drop(phi, electron_temperature, phi_wall=0.0):
+    """Return ``e * (phi - phi_wall) / Te`` with a safe zero-temperature value.
+
+    Potentials are in volts and electron temperature is in joules, matching
+    the units stored in ``fort.31``.  ``phi_wall`` may be a scalar or an array
+    broadcastable to ``phi``.
+    """
+    phi = np.asarray(phi, dtype=float)
+    electron_temperature = np.asarray(electron_temperature, dtype=float)
+    numerator = pyconst.elementary_charge * (phi - phi_wall)
+    return np.divide(
+        numerator,
+        electron_temperature,
+        out=np.zeros_like(phi, dtype=float),
+        where=electron_temperature != 0.0,
+    )
+
+
+def prepare_fort31(
+    edat,
+    genex_data,
+    eorder,
+    iorder,
+    *,
+    phi_wall=0.0,
+    sheath_model=normalized_sheath_potential_drop,
+):
+    """Fill ``fort.31`` with GENE-X data and update the sheath potential drop.
+
+    ``sheath_model`` is injectable so alternate sheath physics can be supplied
+    without changing the rest of the preparation pipeline.
+    """
     # vExB = ExB_velocity() see analyze_moments.py
     upar = dict_to_array(genex_data["u_par"], iorder, edat.fort31["ua"].shape)
     nions = len(iorder)
@@ -220,6 +250,18 @@ def prepare_fort31(edat, genex_data, eorder, iorder):
     edat.fort31["uadia"] = np.zeros((edat.fort31["uadia"].shape))
     edat.fort31["vadia"] = np.zeros((edat.fort31["vadia"].shape))
     edat.fort31["po"] = dict_to_array(genex_data["es_pot"], None)
+    sheath_drop = sheath_model(edat.fort31["po"], edat.fort31["te"], phi_wall)
+    if np.shape(sheath_drop) != edat.fort31["po"].shape:
+        raise ValueError(
+            "Sheath model returned shape "
+            f"{np.shape(sheath_drop)}, expected {edat.fort31['po'].shape}"
+        )
+    edat.fort31["delta_sheathxb"] = np.asarray(
+        sheath_drop, dtype=float
+    ).copy()
+    edat.fort31["delta_sheathyb"] = np.asarray(
+        sheath_drop, dtype=float
+    ).copy()
 
     # pressure and heat fluxes only used for eirene output/graphics
     edat.fort31["pr"] = dict_to_array(genex_data["pr"], None)
@@ -228,9 +270,11 @@ def prepare_fort31(edat, genex_data, eorder, iorder):
     if nions>1:
         qipar = np.mean(qipar,axis=2)
     edat.fort31["fhix"] = qipar * edat.fort31["bb"][:,:,0] # Poloidal ion heat flux
-    # Radial ion heat flux -
+    # Radial heat fluxes are not supplied by the GENE-X coupling.  Reset them
+    # instead of retaining state from whichever fort.31 was used as a skeleton.
+    edat.fort31["fhiy"] = np.zeros_like(edat.fort31["fhiy"])
     edat.fort31["fhex"] = qepar * edat.fort31["bb"][:,:,0] # Poloidal electron heat flux
-    # Radial electron heat flux
+    edat.fort31["fhey"] = np.zeros_like(edat.fort31["fhey"])
 
 """Make sure array is correct shape for fort.31"""
 def dict_to_array(dict_in, order, dim=None):
