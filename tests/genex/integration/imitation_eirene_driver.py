@@ -87,6 +87,7 @@ def test_full_coupling(
             genex_read_attempts=6,
             genex_retry_delay=0.5,
             genex_retry_max_delay=10.0,
+            allow_boundary_misalignment=True,
         )
 
         deps = SimpleNamespace(

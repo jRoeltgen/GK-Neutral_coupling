@@ -564,7 +564,8 @@ def match_boundary_faces(eirene, genex, *, distance_tolerance=None):
     return groups, selected, report
 
 
-def map_boundary_cell_sequences(eirene, genex, *, distance_tolerance=None):
+def map_boundary_cell_sequences(eirene, genex, *, distance_tolerance=None,
+                                allow_boundary_misalignment=False):
     """Map each EIRENE surface to an ordered sequence of native GENE-X cells.
 
     EIRENE supplies the physical surface ordering. Nearest native boundary
@@ -612,7 +613,7 @@ def map_boundary_cell_sequences(eirene, genex, *, distance_tolerance=None):
                          key=lambda item: np.linalg.norm(item[3] - centre))
             j, face_index, cell_index, g_centre, source_area = choice
             distance = float(np.linalg.norm(g_centre - centre))
-            if distance > fallback_limit:
+            if distance > fallback_limit and not allow_boundary_misalignment:
                 raise ValueError(
                     f"{ec.name} face {e_face} is {distance:.6e} m from the "
                     f"nearest GENE-X boundary (limit {fallback_limit:.6e} m)"
@@ -673,6 +674,7 @@ def map_boundary_cell_sequences(eirene, genex, *, distance_tolerance=None):
         "rejected_components": [],
         "fallback_match_count": len(fallback_matches),
         "fallback_matches": fallback_matches,
+        "allow_boundary_misalignment": bool(allow_boundary_misalignment),
     }
     return groups, selected, report
 

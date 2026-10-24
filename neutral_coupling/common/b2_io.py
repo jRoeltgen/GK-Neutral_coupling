@@ -466,16 +466,17 @@ class B2:
             
         field = np.array(data[:numin])
 
-        # Reshape if needed
-        if my_type.lower() != "int":
-            if len(dims) > 1:
-                field = field.reshape(dims,order='F')
+        # b2fgmtry stores both integer and real multidimensional fields in
+        # Fortran order.  Keeping integer fields flat makes the neighbour maps
+        # (leftix, bottomiy, etc.) unusable for geometry/topology operations.
+        if len(dims) > 1:
+            field = field.reshape(dims, order='F')
                     
         return field
     
     def __write_ifield(self, fid, name, values):
         """Write integer field to file."""
-        values = np.atleast_1d(values).ravel()
+        values = np.atleast_1d(values).ravel(order='F')
         fid.write("*cf:    int ")
         fid.write(f'%16d'%len(values))
         fid.write(f'    {name:<32}\n')

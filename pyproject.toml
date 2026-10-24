@@ -36,6 +36,7 @@ gkeyll = [
 
 [project.scripts]
 genex-eirene-coupling = "neutral_coupling.genex_coupling.genex_eirene_coupling:cli"
+create-fort31 = "neutral_coupling.utility.create_fort31:cli"
 
 [tool.setuptools.packages.find]
 include = ["neutral_coupling*"]

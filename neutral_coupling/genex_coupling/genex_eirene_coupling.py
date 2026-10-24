@@ -115,6 +115,9 @@ def main(args, deps=None):
     boundary_report_path = eirene_path / "boundary_flux_report.txt"
     boundary_fingerprints = None
     saved_boundary_mapping = None
+    allow_boundary_misalignment = getattr(
+        args, "allow_boundary_misalignment", False
+    )
     if boundary_mode == "surface":
         eirene_boundary = eirene_boundary_components(
             b2dat.gmtry, ~np.asarray(pol_mask), ~np.asarray(rad_mask)
@@ -125,6 +128,7 @@ def main(args, deps=None):
         saved_boundary_mapping = load_boundary_mapping(
             boundary_mapping_path, boundary_fingerprints,
             report_path=boundary_report_path,
+            allow_boundary_misalignment=allow_boundary_misalignment,
         )
     timeout = 600
     last_tau_advance = perf_counter()
@@ -179,7 +183,9 @@ def main(args, deps=None):
                     try:
                         (boundary_groups, genex_boundary,
                          mapping_report) = map_boundary_cell_sequences(
-                            eirene_boundary, current_boundary
+                            eirene_boundary, current_boundary,
+                            allow_boundary_misalignment=
+                                allow_boundary_misalignment,
                         )
                     except ValueError as error:
                         write_boundary_mapping_failure(
@@ -534,7 +540,8 @@ def geometry_fingerprints(eirene_path, genex_path):
     return fingerprints
 
 
-def load_boundary_mapping(path, current_fingerprints, report_path=None):
+def load_boundary_mapping(path, current_fingerprints, report_path=None,
+                          allow_boundary_misalignment=False):
     """Load a restart mapping, enforcing only geometry changes that invalidate it."""
     path = Path(path)
     if not path.is_file():
@@ -544,6 +551,16 @@ def load_boundary_mapping(path, current_fingerprints, report_path=None):
         if report_path is not None:
             _append_boundary_report(report_path, [
                 f"Ignoring obsolete boundary mapping format in {path}"
+            ])
+        return None
+    saved_override = payload.get("mapping_report", {}).get(
+        "allow_boundary_misalignment", False
+    )
+    if saved_override and not allow_boundary_misalignment:
+        if report_path is not None:
+            _append_boundary_report(report_path, [
+                "Ignoring boundary mapping created with the boundary-"
+                "misalignment override"
             ])
         return None
     saved = payload.get("fingerprints", {})
@@ -655,6 +672,10 @@ def write_boundary_mapping_report(report, path, report_path):
         lines.append(
             f"  fallback nearest-face matches={report['fallback_match_count']} "
             f"(limit={report['fallback_distance_limit']:.6e} m)"
+        )
+    if report.get("allow_boundary_misalignment", False):
+        lines.append(
+            "  WARNING: boundary-misalignment distance errors are disabled"
         )
     _append_boundary_report(report_path, lines)
 
@@ -953,6 +974,12 @@ def cli():
         default="surface",
         help="Conserve outgoing particle flux per matched boundary surface "
              "(default: surface).",
+    )
+    parser.add_argument(
+        "--allow-boundary-misalignment", action="store_true",
+        help="Allow nearest GENE-X/EIRENE boundary matches beyond the hard "
+             "fallback distance. Intended for coarse-grid testing; all such "
+             "matches are still reported.",
     )
     parser.add_argument(
         "--boundary-flux-factor-min", type=float, default=0.5,

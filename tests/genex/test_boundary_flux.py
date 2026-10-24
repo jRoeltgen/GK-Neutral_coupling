@@ -159,6 +159,31 @@ def test_surface_sequence_deduplicates_cells_and_uses_curve_length():
     assert report["genex_matched_face_count"] == 2
 
 
+def test_surface_sequence_can_override_boundary_distance_error():
+    eirene = [component(
+        "eirene", "radial", [[0, 0]], 1, [[0.0, 0.0]],
+    )]
+    genex = [component(
+        "genex", "radial", [[0, 0]], 1, [[10.0, 0.0]],
+    )]
+
+    with pytest.raises(ValueError, match="nearest GENE-X boundary"):
+        map_boundary_cell_sequences(
+            eirene, genex, distance_tolerance=0.1
+        )
+
+    groups, selected, report = map_boundary_cell_sequences(
+        eirene, genex, distance_tolerance=0.1,
+        allow_boundary_misalignment=True,
+    )
+
+    assert groups == [([0], [0])]
+    assert len(selected) == 1
+    assert report["allow_boundary_misalignment"] is True
+    assert report["fallback_match_count"] == 1
+    assert report["fallback_matches"][0]["distance"] == pytest.approx(10.0)
+
+
 def test_normalization_scales_only_outgoing_values_per_species():
     fort31 = {
         "fnax": np.array([[[2.0, 4.0], [-3.0, -6.0]]]),

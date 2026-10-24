@@ -23,6 +23,22 @@ These editable installs make `neutral_coupling` importable without modifying
 
 Backend-independent EIRENE modules are in `neutral_coupling/common`.
 
+## Creating an initial `fort.31`
+
+An initial EIRENE plasma-background file can be generated without a B2 state:
+
+```bash
+create-fort31 --input input.dat --geometry b2fgmtry --fort30 fort.30 \
+  --output fort.31
+```
+
+From a source checkout, `python -m neutral_coupling.utility.create_fort31`
+accepts the same arguments. Existing outputs are not overwritten unless
+`--force` is supplied. Cell volume, magnetic field, pitch angle, and valid face
+masks come from `b2fgmtry`; `fort.30` provides an independent dimension check;
+and `input.dat` provides the physical bulk-ion species count. Other plasma-state
+fields are initialized with shape-correct placeholders.
+
 ## Boundary particle-flux conservation
 
 The GENE-X/EIRENE driver conserves outgoing ion particle flux by default on
