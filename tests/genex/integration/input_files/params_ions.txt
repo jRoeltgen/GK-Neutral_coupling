@@ -1,0 +1,21 @@
+! D3D_184833_4800ms
+&params_species_config
+dist_initial_type = "maxw_vspec"
+is_isotropic      = .true.
+profile_type_dens = "sine"
+profile_type_temp = "sine"
+/
+&params_profile_sine_dens
+! normalizing factor: /1.0
+rho_min           =    0.894
+rho_max           =    1.005
+amp_min           =    0.203
+amp_max           =    2.114
+/
+&params_profile_sine_temp
+! normalizing factor: /0.2
+rho_min           =    0.872
+rho_max           =    1.073
+amp_min           =    0.288
+amp_max           =    7.403
+/

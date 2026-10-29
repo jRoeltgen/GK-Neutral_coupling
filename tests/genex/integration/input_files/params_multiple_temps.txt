@@ -1,0 +1,82 @@
+! DIII-D 184833 4800 ms
+&params_normalization
+    L_ref                   = 1.7336759999301268 ! m
+    B_ref                   = 2.06 ! T
+    T_ref                   = 0.2 ! 0.429 ! keV  ! DRE: I think this is what I divided Te_max, Te_min by to get amp_max, amp_min
+    n_ref                   = 1.0 ! 10^19 / m^3
+    m_ref                   = 1.0 ! amu
+/
+
+&params_mesh
+    use_vspectral           = .true.
+    equilibrium_type        = 3 ! NUMERICAL
+    spacing_RZ              = 0.0015 !0.0008666666666666667 !0.00145 !0.0015 ! D3D, made a little smaller than rho_sep / L_ref
+    n_points_mu             = 4 !24
+    n_points_vp             = 6 !80
+    n_points_phi            = 32
+    !length_vp               = 8 ! not req. for vspec
+    !length_mu               = 64 ! "
+    !quad_type_vp            = "midpoint" !"
+    !grid_type_mu            = "quadratic" !"
+    n_levels                = 4
+/
+&equi_numerical_params
+    equilibrium_case        = "D3D_184833_t4.800"
+    path_to_netcdf          = "."
+    flip_Z                  = .true. ! check this for 184833
+    set_rhomin              = .true.
+    rhomin                  = 0.85
+    set_exclusion_polygon   = .false.
+    !exclusion_polygon_n_pts = 5
+    !exclusion_polygon_x_pts = 0.675, 1.26250217, 1.26250217, 0.675, 0.675
+    !exclusion_polygon_y_pts = -0.84, -0.84, 0.55, 0.55, -0.84
+/
+&params_parallelization
+    n_procs_phi             = 1 !32
+    n_procs_sp              = 1
+    n_procs_mu              = 1 !2
+    n_procs_vp              = 1 !2
+/
+&params_species
+    masses                  = 2.0  0.0005446
+    charges                 = 1.0 -1.0
+    names                   = "ions" "electrons"
+    temp_scalings           = 4.0 3.0 ! 5.0 5.65 ! not sure how this relates to T_ref
+/
+&params_initial_condition
+    initial_perturbation    = "noise"
+    use_canonical_maxw      = .true.
+/
+&params_time_loop
+    dt                      = 2.e-4 ! JG: 2e-4 !0.0004
+    n_timesteps             = 5 !DRE 160000! JG: 1000 !160000
+    steps_diagnostics       = 1 !5 !DRE 100! JG: 10
+    steps_checkpoint        = 4000 !10 !DRE 10000
+    time_stepping_scheme    = "rk4" !"strang_splitting"
+    start_from_checkpoint   = .false.
+    wrap_up_time            = 0 !280 !DRE 360
+/
+&params_numerical_scheme
+    hyp_y                   = 0.14 !0.06
+    hyp_xz                  = 7.5 !5.0
+    hyp_vp                  = 1.0 ! 0.025
+    buf_zone_size           = 2
+    buf_zone_strength       = 200.0
+/
+&params_field_solve
+    smoother                = "GSRB"
+    maxiter                 = 15
+/
+&params_collisions
+    coll_type               = "lbd"
+    relx_type               = "et"
+    dens_floor              = 0.1
+    temp_floor              = 0.1
+/
+
+&params_source_file
+    filepattern = "input_sources"
+    update_delta_t = 2e-4
+    n_temps = 3
+    sources = "dens"
+/

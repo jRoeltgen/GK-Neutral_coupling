@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neutral-coupling"
+version = "0.1.0"
+description = "Coupling utilities for GENE-X, Gkeyll, and EIRENE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "colorama",
+    "numpy",
+    "scipy",
+]
+
+[project.optional-dependencies]
+genex = [
+    "dask",
+    "freeqdsk",
+    "hypothesis",
+    "netCDF4",
+    "pint",
+    "psutil",
+    "pytest",
+    "xarray",
+]
+gkeyll = [
+    "hypothesis",
+    "matplotlib",
+    "numba",
+    "postgkyl",
+    "pytest",
+    "PyYAML",
+]
+
+[project.scripts]
+genex-eirene-coupling = "neutral_coupling.genex_coupling.genex_eirene_coupling:cli"
+
+[tool.setuptools.packages.find]
+include = ["neutral_coupling*"]
+
+[tool.setuptools.package-data]
+"neutral_coupling.gkeyll_coupling.geometry" = ["stored_data/*"]
+"neutral_coupling.gkeyll_coupling.io" = ["reflection_data/*.txt"]
+"neutral_coupling.gkeyll_coupling.examples" = ["*.yaml", "*.sh", "eirene_submission_script"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
