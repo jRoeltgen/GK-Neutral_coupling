@@ -703,11 +703,19 @@ def outgoing_rate(values, components):
 def normalize_eirene_particle_fluxes(
     fort31, eirene_components, genex_fluxes, genex_components, groups,
     species_names, *, factor_min=.5, factor_max=2.0,
+    negligible_fraction=.01,
     radial_flux_scaling=1.0,
+    allow_boundary_misalignment=False,
 ):
     """Conserve outgoing rates, with an optional extra radial-flux scaling."""
+    if (not np.isfinite(negligible_fraction)
+            or not 0.0 <= negligible_fraction <= 1.0):
+        raise ValueError("negligible_fraction must be finite and in [0, 1]")
     if not np.isfinite(radial_flux_scaling) or radial_flux_scaling < 0.0:
         raise ValueError("radial_flux_scaling must be finite and non-negative")
+    if allow_boundary_misalignment:
+        factor_min = min(factor_min, 1 / 100)
+        factor_max = max(factor_max, 100.0)
     records = []
     for species_index, species in enumerate(species_names):
         native = {
@@ -757,8 +765,34 @@ def normalize_eirene_particle_fluxes(
                 )
             else:
                 factor = g_total / e_total
-                if (not np.isfinite(factor)
-                        or not factor_min <= factor <= factor_max):
+                negligible_zero_target = (
+                    g_total == 0.0
+                    and gross > 0.0
+                    and e_total / gross <= negligible_fraction
+                )
+                scaled_radial_zero_target = (
+                    g_total == 0.0
+                    and radial_flux_scaling != 1.0
+                    and all(component.kind == "radial" for component in ecs)
+                )
+                if negligible_zero_target or scaled_radial_zero_target:
+                    # Only outward entries are multiplied by this factor below;
+                    # retain inward fluxes for EIRENE even when the negligible
+                    # outward Monte Carlo contribution is removed.
+                    factor = 0.0
+                    if negligible_zero_target:
+                        record["warning"] = (
+                            "zero GENE-X outward flux; negligible EIRENE "
+                            f"outward fraction {e_total / gross:.6g} <= "
+                            f"{negligible_fraction:.6g} was set to zero"
+                        )
+                    else:
+                        record["warning"] = (
+                            "zero GENE-X outward flux accepted for explicitly "
+                            "scaled radial fluxes"
+                        )
+                elif (not np.isfinite(factor)
+                      or not factor_min <= factor <= factor_max):
                     raise ValueError(
                         f"boundary factor {factor:.6g} outside "
                         f"[{factor_min}, {factor_max}]: {record}"

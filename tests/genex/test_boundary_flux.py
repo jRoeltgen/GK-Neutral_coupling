@@ -283,6 +283,94 @@ def test_normalization_rejects_implausible_factor():
         )
 
 
+def test_negligible_outward_flux_can_scale_to_zero_without_changing_inward():
+    fort31 = {"fnax": np.zeros((1, 2)),
+              "fnay": np.array([[0.5, -100.0]])}
+    eirene = [component("e", "radial", [[0, 0], [0, 1]], 1,
+                        [[1, 0], [1, 1]])]
+    genex = [component("g", "radial", [[0, 0], [0, 1]], 1,
+                       [[1, 0], [1, 1]])]
+    native = {"poloidal": np.zeros((1, 2)),
+              "radial": np.array([[0.0, -80.0]])}
+
+    records = normalize_eirene_particle_fluxes(
+        fort31, eirene, native, genex, [([0], [0])], ["D"],
+    )
+
+    np.testing.assert_allclose(fort31["fnay"], [[0.0, -100.0]])
+    assert records[0]["factor"] == 0.0
+    assert records[0]["eirene_inward"] == pytest.approx(100.0)
+    assert records[0]["eirene_outward_after"] == 0.0
+    assert "negligible EIRENE outward fraction" in records[0]["warning"]
+
+
+def test_zero_target_rejects_non_negligible_eirene_outward_flux():
+    fort31 = {"fnax": np.zeros((1, 2)),
+              "fnay": np.array([[2.0, -100.0]])}
+    eirene = [component("e", "radial", [[0, 0], [0, 1]], 1,
+                        [[1, 0], [1, 1]])]
+    genex = [component("g", "radial", [[0, 0], [0, 1]], 1,
+                       [[1, 0], [1, 1]])]
+    native = {"poloidal": np.zeros((1, 2)),
+              "radial": np.array([[0.0, -80.0]])}
+
+    with pytest.raises(ValueError, match="boundary factor 0 outside"):
+        normalize_eirene_particle_fluxes(
+            fort31, eirene, native, genex, [([0], [0])], ["D"],
+        )
+
+
+def test_scaled_radial_flux_can_have_non_negligible_zero_target():
+    fort31 = {"fnax": np.zeros((1, 2)),
+              "fnay": np.array([[2.0, -100.0]])}
+    eirene = [component("e", "radial", [[0, 0], [0, 1]], 1,
+                        [[1, 0], [1, 1]])]
+    genex = [component("g", "radial", [[0, 0], [0, 1]], 1,
+                       [[1, 0], [1, 1]])]
+    native = {"poloidal": np.zeros((1, 2)),
+              "radial": np.array([[0.0, -80.0]])}
+
+    records = normalize_eirene_particle_fluxes(
+        fort31, eirene, native, genex, [([0], [0])], ["D"],
+        radial_flux_scaling=1e-20,
+    )
+
+    np.testing.assert_allclose(fort31["fnay"], [[0.0, -1e-18]])
+    assert records[0]["factor"] == 0.0
+    assert records[0]["eirene_outward_after"] == 0.0
+    assert "scaled radial fluxes" in records[0]["warning"]
+
+
+def test_boundary_misalignment_extends_normalization_factor_tolerance():
+    eirene = [component("e", "radial", [[0, 0]], 1, [[1, 0]])]
+    genex = [component("g", "radial", [[0, 0]], 1, [[1, 0]])]
+    fort31 = {"fnax": np.zeros((1, 1)), "fnay": np.ones((1, 1))}
+    native = {"poloidal": np.zeros((1, 1)),
+              "radial": np.full((1, 1), 100.0)}
+
+    records = normalize_eirene_particle_fluxes(
+        fort31, eirene, native, genex, [([0], [0])], ["D"],
+        allow_boundary_misalignment=True,
+    )
+
+    assert records[0]["factor"] == pytest.approx(100.0)
+    assert fort31["fnay"][0, 0] == pytest.approx(100.0)
+
+
+def test_boundary_misalignment_still_rejects_factor_above_extended_tolerance():
+    eirene = [component("e", "radial", [[0, 0]], 1, [[1, 0]])]
+    genex = [component("g", "radial", [[0, 0]], 1, [[1, 0]])]
+    fort31 = {"fnax": np.zeros((1, 1)), "fnay": np.ones((1, 1))}
+    native = {"poloidal": np.zeros((1, 1)),
+              "radial": np.full((1, 1), 101.0)}
+
+    with pytest.raises(ValueError, match=r"outside \[0.01, 100.0\]"):
+        normalize_eirene_particle_fluxes(
+            fort31, eirene, native, genex, [([0], [0])], ["D"],
+            allow_boundary_misalignment=True,
+        )
+
+
 def test_all_zero_eirene_nonzero_genex_is_fatal():
     eirene = [component("e", "radial", [[0, 0]], 1, [[1, 0]])]
     genex = [component("g", "radial", [[0, 0]], 1, [[1, 0]])]

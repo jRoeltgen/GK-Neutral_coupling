@@ -605,6 +605,42 @@ def test_load_transaction_retries_zero_dimension_race(
     mock_sleep.assert_called_once_with(0.5)
 
 
+@patch("neutral_coupling.genex_coupling.genex_interface.time.sleep")
+@patch("neutral_coupling.genex_coupling.genex_interface.random.uniform", return_value=1.0)
+@patch("neutral_coupling.genex_coupling.genex_interface._load_latest_genex_fields_once")
+def test_load_transaction_retries_out_of_bounds_index_race(
+    mock_once, mock_uniform, mock_sleep, fake_grid, fake_norm, fake_species
+):
+    mock_once.side_effect = [
+        IndexError("Index 139 is out of bounds for axis 0 with size 139"),
+        ("fields", 1.0),
+    ]
+
+    result = load_latest_genex_fields(
+        "path", fake_species, fake_grid, "equi", "params", fake_norm,
+        -1, 1, read_attempts=4, retry_delay=0.5, retry_max_delay=10,
+    )
+
+    assert result == ("fields", 1.0)
+    assert mock_once.call_count == 2
+    mock_sleep.assert_called_once_with(0.5)
+
+
+@patch("neutral_coupling.genex_coupling.genex_interface._load_latest_genex_fields_once")
+def test_load_transaction_does_not_retry_unrelated_index_error(
+    mock_once, fake_grid, fake_norm, fake_species
+):
+    mock_once.side_effect = IndexError("invalid lookup")
+
+    with pytest.raises(IndexError, match="invalid lookup"):
+        load_latest_genex_fields(
+            "path", fake_species, fake_grid, "equi", "params", fake_norm,
+            -1, 1, read_attempts=4,
+        )
+
+    mock_once.assert_called_once()
+
+
 @patch("neutral_coupling.genex_coupling.genex_interface._load_latest_genex_fields_once")
 def test_load_transaction_does_not_retry_unrelated_value_error(
     mock_once, fake_grid, fake_norm, fake_species
@@ -793,13 +829,46 @@ def test_get_tau_for_vars_inconsistent(mock_load):
 
 @patch("neutral_coupling.genex_coupling.genex_interface.load_snaps_genex")
 def test_get_tau_for_vars_exception(mock_load):
-    mock_load.side_effect = RuntimeError("mid-write")
+    read_error = RuntimeError("mid-write")
+    mock_load.side_effect = read_error
+    errors = []
 
     from neutral_coupling.genex_coupling.genex_interface import get_tau_for_vars
 
-    result = get_tau_for_vars("path", ["e"])
+    result = get_tau_for_vars("path", ["e"], on_error=errors.append)
 
     assert result is None
+    assert errors == [read_error]
+
+
+@patch("neutral_coupling.genex_coupling.genex_interface.get_mom_paths")
+def test_wait_until_genex_stable_preserves_last_read_error(mock_paths):
+    mock_paths.return_value = ["dummy"]
+
+    from neutral_coupling.genex_coupling.genex_interface import wait_until_genex_stable
+
+    with patch(
+        "neutral_coupling.genex_coupling.genex_interface.get_tau_for_vars"
+    ) as mock_tau:
+        def fail_read(path, species, on_error=None):
+            error = OSError("diagnostic mid-write")
+            on_error(error)
+            return None
+
+        mock_tau.side_effect = fail_read
+        with pytest.raises(
+            RuntimeError,
+            match="last suppressed diagnostic read error: OSError: diagnostic mid-write",
+        ) as exc_info:
+            wait_until_genex_stable(
+                "path",
+                ["e"],
+                check_interval=0.0,
+                stable_time=0.0,
+                timeout=0.01,
+            )
+
+    assert isinstance(exc_info.value.__cause__, OSError)
 
 @patch("neutral_coupling.genex_coupling.genex_interface.get_tau_for_vars")
 @patch("neutral_coupling.genex_coupling.genex_interface.get_mom_paths")

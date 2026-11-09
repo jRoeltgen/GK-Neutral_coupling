@@ -135,7 +135,7 @@ def load_latest_genex_fields(gpath, all_spec, grid, equi, params, norm,
                 gpath, all_spec, grid, equi, params, norm, time_index,
                 timeout, read_mode,
             )
-        except (RuntimeError, OSError, ValueError) as error:
+        except (RuntimeError, OSError, ValueError, IndexError) as error:
             if not is_transient_genex_read_error(error):
                 raise
             last_error = error
@@ -333,6 +333,9 @@ def is_transient_genex_read_error(error):
     """Identify failures caused by reading diagnostics during a write."""
     if is_hdf_error(error):
         return True
+    if isinstance(error, IndexError):
+        message = str(error).lower()
+        return "index" in message and "out of bounds" in message
     return (
         isinstance(error, ValueError)
         and "cannot handle size zero dimensions" in str(error).lower()
@@ -354,9 +357,9 @@ def get_mom_paths(genex_path):
     single = genex_path / "mom_2d.nc"
     return [single] if single.exists() else []
 
-def get_tau_for_vars(genex_path, species):
-    vars_to_check = ["n", "Q_perp"]
-
+def get_tau_for_vars(genex_path, species, on_error=None):
+    vars_to_check = ["n", "Q_perp", "Q_par", "u_par", "E_par", "E_perp"]
+    sp_indep_vars_to_check = ["es_pot"]
     taus = []
     for s in species:
         for var in vars_to_check:
@@ -365,8 +368,20 @@ def get_tau_for_vars(genex_path, species):
                 tau = da.coords["tau"].values
                 del da
                 taus.append(tau)
-            except Exception:
+            except Exception as error:
+                if on_error is not None:
+                    on_error(error)
                 return None  # mid-write or unavailable
+    for var in sp_indep_vars_to_check:
+        try:
+            da = load_snaps_genex(genex_path, None, var)
+            tau = da.coords["tau"].values
+            del da
+            taus.append(tau)
+        except Exception as error:
+            if on_error is not None:
+                on_error(error)
+            return None  # mid-write or unavailable
 
     # consistency check
     ref = taus[0]
@@ -388,15 +403,28 @@ def wait_until_genex_stable(
 
     last_tau = None
     stable_start = None
+    last_read_error = None
+
+    def preserve_read_error(error):
+        nonlocal last_read_error
+        last_read_error = error
 
     while True:
         if time.time() - start > timeout:
-            raise RuntimeError("GENE-X did not stabilize")
+            message = "GENE-X did not stabilize"
+            if last_read_error is not None:
+                message += (
+                    "; last suppressed diagnostic read error: "
+                    f"{type(last_read_error).__name__}: {last_read_error}"
+                )
+            raise RuntimeError(message) from last_read_error
         paths = get_mom_paths(genex_path)
         if not paths:
             time.sleep(check_interval)
             continue
-        tau = get_tau_for_vars(genex_path, species_list)
+        tau = get_tau_for_vars(
+            genex_path, species_list, on_error=preserve_read_error
+        )
         if tau is None:
             stable_start = None
             time.sleep(check_interval)

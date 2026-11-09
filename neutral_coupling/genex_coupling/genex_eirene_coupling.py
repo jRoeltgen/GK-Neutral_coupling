@@ -230,7 +230,11 @@ def main(args, deps=None):
                 edat.species_names["bulk_ions"],
                 factor_min=getattr(args, "boundary_flux_factor_min", .5),
                 factor_max=getattr(args, "boundary_flux_factor_max", 2.0),
+                negligible_fraction=getattr(
+                    args, "boundary_flux_negligible_fraction", .01
+                ),
                 radial_flux_scaling=getattr(args, "radial_flux_scaling", 1.0),
+                allow_boundary_misalignment=allow_boundary_misalignment,
             )
             write_boundary_normalization_report(
                 normalization_records, index, tau, boundary_report_path
@@ -979,7 +983,8 @@ def cli():
         "--allow-boundary-misalignment", action="store_true",
         help="Allow nearest GENE-X/EIRENE boundary matches beyond the hard "
              "fallback distance. Intended for coarse-grid testing; all such "
-             "matches are still reported.",
+             "matches are still reported. Also extends the accepted boundary "
+             "normalization-factor range to at least 0.01 through 100.",
     )
     parser.add_argument(
         "--boundary-flux-factor-min", type=float, default=0.5,
@@ -988,6 +993,12 @@ def cli():
     parser.add_argument(
         "--boundary-flux-factor-max", type=float, default=2.0,
         help="Largest accepted boundary normalization factor.",
+    )
+    parser.add_argument(
+        "--boundary-flux-negligible-fraction", type=float, default=0.01,
+        help="Accept a zero GENE-X outward flux when the corresponding "
+             "EIRENE outward flux is at most this fraction of the largest "
+             "GENE-X or EIRENE gross surface flux (default: 0.01).",
     )
     parser.add_argument(
         "--radial-flux-scaling", type=float, default=1.0,
@@ -999,6 +1010,11 @@ def cli():
         parser.error("--boundary-flux-factor-min must be positive")
     if args.boundary_flux_factor_max < args.boundary_flux_factor_min:
         parser.error("boundary flux factor maximum must be >= minimum")
+    if (not np.isfinite(args.boundary_flux_negligible_fraction)
+            or not 0 <= args.boundary_flux_negligible_fraction <= 1):
+        parser.error(
+            "--boundary-flux-negligible-fraction must be finite and in [0, 1]"
+        )
     if not np.isfinite(args.radial_flux_scaling) or args.radial_flux_scaling < 0:
         parser.error("--radial-flux-scaling must be finite and non-negative")
     main(args)
