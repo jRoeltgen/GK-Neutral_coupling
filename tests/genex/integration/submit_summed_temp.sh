@@ -94,7 +94,8 @@ test_full_coupling(
     eirene_path=os.environ['EIRENE_PATH'],
 )
 "; then
-    rm -rf -- "$RUN_DIR/mesh.nc" "$RUN_DIR"/part*
+    "$SCRIPT_DIR/verify_and_retain_mesh.sh" "$RUN_DIR" "$SCRIPT_DIR" "$SCRATCH_ROOT" || exit $?
+    rm -rf -- "$RUN_DIR"/part*
     cp -a "$RUN_DIR"/. .
 else
     status=$?

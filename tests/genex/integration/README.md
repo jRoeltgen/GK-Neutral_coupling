@@ -52,6 +52,18 @@ sbatch submit_multiple_temps.sh
 If submitting from somewhere else, set `INTEGRATION_DIR` to the absolute path
 of `tests/genex/integration` before calling `sbatch`.
 
-Each job prints its temporary run directory. Large GENE-X mesh and partition
-files (~10GB) are deleted after a successful test; failed-run output is preserved in
-scratch for diagnosis. The summed_temp=True test may be machine dependent and increasing the number of timesteps in `params_summed_temp.txt` may allow a previously failed run to pass.
+Each job prints its temporary run directory. Partition files are deleted after
+a successful test. The generated `mesh.nc` (~10GB) is first used by the
+standalone conservative-interpolation test and then moved to scratch as a
+reusable artifact; its path is printed by the job. Set `GENEX_MESH_ARTIFACT`
+before submission to choose an explicit artifact path. Re-run the lightweight
+check without a job using:
+
+```bash
+GENEX_INTERPOLATION_MESH=/path/to/mesh.nc \
+    python -m pytest -q ../test_real_mesh_interpolation.py
+```
+
+Failed-run output is preserved in scratch for diagnosis. The summed_temp=True
+test may be machine dependent and increasing the number of timesteps in
+`params_summed_temp.txt` may allow a previously failed run to pass.

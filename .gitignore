@@ -21,3 +21,4 @@ notes.txt
 profile-results/
 /analysis/output/
 tests/genex/integration/input_files/boundary_flux*
+tests/genex/integration/input_files/fort.31

@@ -99,6 +99,11 @@ def coupling_env(monkeypatch, tmp_path):
             SimpleNamespace(name="e", is_electron=True),
         ]),
     )
+    monkeypatch.setattr(
+        mod.genex_interface,
+        "get_genex_source_weights",
+        MagicMock(return_value=np.array([1.0])),
+    )
 
     def make_es_pot(scale):
         return xr.DataArray(
@@ -128,6 +133,8 @@ def coupling_env(monkeypatch, tmp_path):
     # ----------------------------
     edat = MagicMock()
     edat.species_names = {"bulk_ions": ["D"]}
+    edat.fort46 = {"volumes": np.array([[1.0]])}
+    edat.triangle_mesh.incenter = np.array([[1.0, 2.0]])
     edat.sources = {
         "particle": {
             "D": {"SUM": np.array([1.0]), "stratum_1": np.array([2.0])},
@@ -160,6 +167,7 @@ def coupling_env(monkeypatch, tmp_path):
     # Other required patches
     # ----------------------------
     monkeypatch.setattr(mod, "build_triangulation", MagicMock(return_value="tri"))
+    monkeypatch.setattr(mod, "ConservativeSourceMapper", MagicMock())
     monkeypatch.setattr(mod, "interpolate_all_moments", MagicMock(return_value={}))
     monkeypatch.setattr(mod, "interpolate_all_sources", MagicMock(return_value={}))
     monkeypatch.setattr(mod, "prepare_fort31", MagicMock())

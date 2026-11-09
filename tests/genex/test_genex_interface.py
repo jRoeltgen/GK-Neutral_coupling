@@ -11,6 +11,7 @@ ureg = UnitRegistry()
 from neutral_coupling.genex_coupling.genex_interface import (
     wait_for_genex_init,
     get_grid_with_ghost_filler,
+    get_genex_source_weights,
     load_latest_genex_fields,
     calculate_temperatures,
     toroidal_avg,
@@ -65,6 +66,18 @@ def mocked_io():
 
         mock_resolver.return_value = Path("mesh.nc")
         yield mock_open
+
+
+def test_get_genex_source_weights_uses_full_torus_physical_volume(mocked_io):
+    mocked_io.return_value = xr.Dataset({
+        "jacobian": (("dim_RZ", "dim_phi"), [[1.0, 3.0], [2.0, 4.0]]),
+        "RZw": (("dim_RZ", "dim_phi"), [[2.0, 2.0], [5.0, 5.0]]),
+    })
+
+    result = get_genex_source_weights("run", 2.0)
+
+    expected = np.array([4.0, 15.0]) * (2.0 * np.pi * 2.0 ** 3)
+    np.testing.assert_allclose(result, expected)
 
 @patch("neutral_coupling.genex_coupling.genex_interface.get_grid_with_ghost_filler")
 @patch("neutral_coupling.genex_coupling.genex_interface.load_genex_in_target")

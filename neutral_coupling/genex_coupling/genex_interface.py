@@ -88,6 +88,45 @@ def get_grid_with_ghost_filler(directory_path):
 
     return x_unstructured, y_unstructured, compute, buf_zone
 
+
+def get_genex_source_weights(directory_path, length_scale):
+    """Return physical full-torus GENE-X source-integration weights.
+
+    GENE-X integrates with ``jacobian * RZw * phiw`` in normalized spatial
+    coordinates.  A toroidally uniform external source therefore uses the
+    phi-average of ``jacobian * RZw``, multiplied by ``2*pi*R0**3``.
+    """
+    grid_group = xr.open_dataset(
+        filepath_resolver(directory_path, "mesh.nc"), group="RZ_grid"
+    )
+    try:
+        missing = {"jacobian", "RZw"} - set(grid_group.variables)
+        if missing:
+            raise ValueError(
+                "mesh.nc RZ_grid lacks GENE-X source-weight variables: "
+                + ", ".join(sorted(missing))
+            )
+        jacobian = grid_group["jacobian"]
+        rzw = grid_group["RZw"]
+        phi_dims = [dim for dim in jacobian.dims if "phi" in dim.lower()]
+        if len(phi_dims) != 1:
+            raise ValueError("Could not identify the phi dimension of mesh.nc jacobian")
+        if hasattr(length_scale, "to"):
+            r0 = length_scale.to("m").magnitude
+        else:
+            r0 = getattr(length_scale, "magnitude", length_scale)
+        r0 = float(r0)
+        if not np.isfinite(r0) or r0 <= 0:
+            raise ValueError("GENE-X R0 must be finite and positive")
+        weights = ((jacobian * rzw).mean(phi_dims[0]) *
+                   (2.0 * np.pi * r0 ** 3)).load()
+        values = np.asarray(weights, dtype=float).reshape(-1)
+    finally:
+        grid_group.close()
+    # Filler slots may contain sentinels; the active subset is validated by
+    # ConservativeSourceMapper after masks are applied.
+    return values
+
 def get_genex_species(params):
     names = params['params_species']['names']
     charges = params['params_species']['charges']

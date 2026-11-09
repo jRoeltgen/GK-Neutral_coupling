@@ -2,8 +2,8 @@
 import psutil
 from pathlib import Path
 from collections import defaultdict
-from .interpolate import (interpolate_all_sources, interpolate_source, interp_moments,
-                         build_triangulation)
+from .interpolate import (ConservativeSourceMapper, interpolate_all_sources,
+                         interpolate_source, interp_moments, build_triangulation)
 from .eirene_interface import (eirene_interface, run_eirene, prepare_fort31,
                               get_temperatures, status)
 from neutral_coupling.common.temperature_mapping_utils import (
@@ -25,6 +25,7 @@ import faulthandler
 import scipy.constants as pyconst
 import hashlib
 import json
+from dataclasses import asdict
 from .boundary_flux import (
     BoundaryComponent,
     eirene_boundary_components,
@@ -107,6 +108,16 @@ def main(args, deps=None):
     last_tau = -1
     # Precompute triangulation
     tri = build_triangulation(grid_r[in_plasma], grid_z[in_plasma])
+    eirene_weights = np.asarray(edat.fort46["volumes"], dtype=float).reshape(-1)
+    genex_weights = genex_interface.get_genex_source_weights(
+        genex_path, norm["R0"]
+    )
+    conservative_mapper = ConservativeSourceMapper(
+        edat.triangle_mesh.incenter,
+        np.column_stack((grid_r[in_plasma], grid_z[in_plasma])),
+        eirene_weights,
+        genex_weights[in_plasma],
+    )
     boundary_mode = getattr(args, "boundary_flux_normalization", "surface")
     eirene_boundary = None
     boundary_groups = None
@@ -324,11 +335,32 @@ def main(args, deps=None):
             )
             write_temperatures = True
 
+        source_diagnostics = {}
         interp_sources = interpolate_all_sources_wrapper(
             edat.triangle_mesh, sources,
             grid_r, grid_z, in_plasma,
+            mapper=conservative_mapper,
+            diagnostics=source_diagnostics,
             genex_electrons=genex_electrons,
         )
+        diagnostics_path = eirene_path / f"source_mapping_{index:06d}.json"
+        diagnostics_path.write_text(json.dumps(
+            {label: asdict(report) for label, report in source_diagnostics.items()},
+            indent=2,
+        ) + "\n")
+        significant = [label for label, report in source_diagnostics.items()
+                       if report.significant]
+        worst = max(source_diagnostics.items(),
+                    key=lambda item: item[1].worst_relative_error,
+                    default=None)
+        if worst is not None:
+            print(
+                f"[{index}] Conservative source mapping: max global residual="
+                f"{max(r.global_residual for r in source_diagnostics.values()):.3e}, "
+                f"worst regional error={worst[1].worst_relative_error:.3e} "
+                f"({worst[0]}), flagged fields={len(significant)}",
+                flush=True,
+            )
 
         filename = source_filename(args.filepattern, index)
         filename_tmp = filename + ".tmp"
@@ -782,6 +814,8 @@ def interpolate_all_sources_wrapper(
     fill_mode="constant",
     fill_value=0.0,
     genex_electrons="ELECTRONS",
+    mapper=None,
+    diagnostics=None,
 ):
     """
     Wrapper around interpolate_all_sources that:
@@ -795,14 +829,15 @@ def interpolate_all_sources_wrapper(
     z_sub = grid_z[compute]
 
     # Call original function (unchanged)
+    interpolation_options = dict(
+        method=method, fill_mode=fill_mode, fill_value=fill_value
+    )
+    if mapper is not None:
+        interpolation_options["mapper"] = mapper
+    if diagnostics is not None:
+        interpolation_options["diagnostics"] = diagnostics
     sub_out = interpolate_all_sources(
-        tria,
-        source_dict,
-        r_sub,
-        z_sub,
-        method=method,
-        fill_mode=fill_mode,
-        fill_value=fill_value,
+        tria, source_dict, r_sub, z_sub, **interpolation_options
     )
 
     # Prepare full output structure

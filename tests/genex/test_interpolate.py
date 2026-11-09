@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from hypothesis import given, strategies as st
 from neutral_coupling.genex_coupling.interpolate import (
+    ConservativeSourceMapper,
     interp_moments,
     interpolate_source,
     interpolate_all_sources,
@@ -9,6 +10,54 @@ from neutral_coupling.genex_coupling.interpolate import (
 )
 
 from unittest.mock import patch
+
+
+def _conservative_mapper(destination_points=None):
+    points = np.array([[0., 0.], [1., 0.], [0., 1.], [1., 1.]])
+    if destination_points is None:
+        destination_points = points
+    return ConservativeSourceMapper(
+        points, destination_points,
+        source_weights=np.array([1., 2., 3., 4.]),
+        destination_weights=np.ones(len(destination_points)),
+    )
+
+
+def test_conservative_mapper_preserves_signed_integrals():
+    mapper = _conservative_mapper()
+    source = np.array([2., -3., 4., -5.])
+
+    mapped, report = mapper.map(source, label="particle/D/SUM")
+
+    assert np.dot(np.maximum(mapped, 0), mapper.destination_weights) == pytest.approx(
+        np.dot(np.maximum(source, 0), mapper.source_weights)
+    )
+    assert np.dot(np.minimum(mapped, 0), mapper.destination_weights) == pytest.approx(
+        np.dot(np.minimum(source, 0), mapper.source_weights)
+    )
+    assert report.global_residual < 1e-14
+
+
+def test_conservative_mapper_zero_source_stays_zero():
+    mapped, report = _conservative_mapper().map(np.zeros(4))
+    np.testing.assert_array_equal(mapped, 0)
+    assert report.global_residual == 0
+
+
+def test_conservative_mapper_rejects_nonzero_source_without_support():
+    mapper = _conservative_mapper(np.array([[10., 10.], [11., 11.]]))
+    with pytest.raises(ValueError, match="no support on active GENE-X cells"):
+        mapper.map(np.ones(4), label="energy/D/Ti")
+
+
+def test_regional_diagnostic_detects_biased_mapping():
+    mapper = _conservative_mapper()
+    source = np.array([10., 0., 0., 0.])
+    biased = np.array([0., 10., 0., 0.])
+    report = mapper.diagnose(source, biased)
+    assert report.global_residual == pytest.approx(0)
+    assert report.significant
+    assert report.worst_relative_error > 0.1
 
 def test_interpolate_all_sources_dispatch_and_structure():
     tria = type("MockTria", (), {})()
