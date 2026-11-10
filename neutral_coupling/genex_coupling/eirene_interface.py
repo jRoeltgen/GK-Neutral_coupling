@@ -2,7 +2,7 @@ from neutral_coupling.common import eirene_io as eireneIO
 from neutral_coupling.common import b2_io as B2IO
 from neutral_coupling.common import triangle_mesh
 from neutral_coupling.common.eirene_input_parser import EireneInputParser
-from neutral_coupling.utility.create_fort31 import build_fort31
+from neutral_coupling.utility.create_fort31 import build_fort31, _flux_masks
 from pathlib import Path
 import scipy.constants as pyconst
 from scipy.interpolate import LinearNDInterpolator
@@ -60,12 +60,12 @@ def eirene_interface(eirene_path, b2_path):
             "and fort.30",
             flush=True,
         )
-    if edat.fort31["fnax"].ndim == 3:
-        pol_mask = edat.fort31["fnax"][:,:,0] == 0
-        rad_mask = edat.fort31["fnay"][:,:,0] == 0
-    else:
-        pol_mask = edat.fort31["fnax"] == 0
-        rad_mask = edat.fort31["fnay"] == 0
+    # Boundary topology is a geometry property.  Do not infer it from the
+    # evolving flux values in a runtime fort.31: a physically zero flux (or a
+    # previous normalization) must not remove a valid face on restart.
+    valid_poloidal, valid_radial = _flux_masks(b2dat.gmtry, nx, ny)
+    pol_mask = ~valid_poloidal
+    rad_mask = ~valid_radial
 
     edat.triangle_mesh.calc_incenter()
 

@@ -194,6 +194,16 @@ class CheckedRunEirene:
         # --- Build synthetic EIRENE response ---
         R = self.edat.triangle_mesh.incenter[:,0]
         Z = self.edat.triangle_mesh.incenter[:,1]
+        # Real EIRENE writes fort.46 for every run.  The coupling now uses its
+        # triangle volumes for conservative source mapping, so the summed-mode
+        # substitute must provide the same output as the multi-temperature
+        # substitute.
+        self._write_checked_fort46(
+            eirene_path / "fort.46",
+            parser,
+            R,
+            Z,
+        )
 
         source_index = self.source_index
         sign = self._summed_source_sign(source_index, eirene_path)
@@ -661,6 +671,26 @@ class CheckedRunEirene:
     def _write_checked_fort46(self, filepath, parser, R, Z):
         """Write deterministic, spatially varying neutral temperatures."""
         ntri = R.size
+        volumes = np.ones((ntri, 1))
+        mesh = getattr(self.edat, "triangle_mesh", None)
+        if (mesh is not None and hasattr(mesh, "nodes") and
+                hasattr(mesh, "cells")):
+            vertices = np.asarray(mesh.nodes)[np.asarray(mesh.cells) - 1]
+            twice_area = np.abs(
+                (vertices[:, 1, 0] - vertices[:, 0, 0]) *
+                (vertices[:, 2, 1] - vertices[:, 0, 1]) -
+                (vertices[:, 2, 0] - vertices[:, 0, 0]) *
+                (vertices[:, 1, 1] - vertices[:, 0, 1])
+            )
+            centroid_r = np.mean(vertices[:, :, 0], axis=1)
+            volumes = (np.pi * centroid_r * twice_area).reshape(-1, 1)
+            if (volumes.shape != (ntri, 1) or
+                    not np.isfinite(volumes).all() or
+                    np.any(volumes <= 0)):
+                raise ValueError(
+                    "Checked EIRENE mesh produced invalid axisymmetric "
+                    "triangle volumes"
+                )
         radial = np.divide(
             R - np.min(R),
             np.ptp(R),
@@ -684,7 +714,7 @@ class CheckedRunEirene:
             "ntri": ntri,
             "ver": 20170930,
             "label": "CHECKED",
-            "volumes": np.ones((ntri, 1)),
+            "volumes": volumes,
             "pux": np.zeros((ntri, 1)),
             "puy": np.zeros((ntri, 1)),
             "pvx": np.zeros((ntri, 1)),

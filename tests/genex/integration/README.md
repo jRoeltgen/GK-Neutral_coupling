@@ -36,6 +36,12 @@ Temporary output uses `NEUTRAL_COUPLING_SCRATCH`, then `PSCRATCH`, then
 export NEUTRAL_COUPLING_SCRATCH=/path/to/shared/scratch
 ```
 
+Each launcher removes generated coupling state from `input_files` before
+starting, including the evolving `fort.31`, EIRENE source outputs, and cached
+boundary mappings. Static geometry inputs such as `fort.30/33/34/35` are
+preserved. This makes reruns independent of whether the preceding job passed
+or failed.
+
 Also update the `#SBATCH` account and email directives in each submission
 script for the target system.
 

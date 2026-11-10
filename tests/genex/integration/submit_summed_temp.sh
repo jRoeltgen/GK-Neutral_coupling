@@ -59,7 +59,12 @@ PARAM_FILE="params_summed_temp.txt"
 cp $SCRIPT_DIR/input_files/params* $RUN_DIR
 mv $RUN_DIR/$PARAM_FILE "${RUN_DIR}/params_in.txt"
 cp $SCRIPT_DIR/input_files/D3D_184833_t4.800.nc $RUN_DIR
-rm -rf eirene_sources* input_sources*
+# Reset coupling outputs from earlier successful or failed jobs.  In
+# particular, fort.31 is rewritten every iteration and its zero pattern is
+# used to identify EIRENE boundary faces at startup.  Keep the static two-digit
+# geometry inputs (fort.30/33/34/35).
+rm -rf eirene_sources* input_sources* source_mapping_*.json \
+    boundary_flux* fort.31 fort.46 fort.[1-9][0-9][0-9]
 
 echo "Outputting temporary GENE-X files to ${RUN_DIR}"
 srun -Q --chdir="$SCRIPT_DIR/input_files" \

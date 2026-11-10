@@ -29,7 +29,8 @@ def fake_b2_path(tmp_path):
 @patch("neutral_coupling.genex_coupling.eirene_interface.B2IO.B2")
 @patch("neutral_coupling.genex_coupling.eirene_interface.eireneIO.eirene")
 @patch("neutral_coupling.genex_coupling.eirene_interface.build_fort31")
-def test_eirene_interface(mock_build_fort31, mock_eirene_class, mock_b2_class,
+@patch("neutral_coupling.genex_coupling.eirene_interface._flux_masks")
+def test_eirene_interface(mock_flux_masks, mock_build_fort31, mock_eirene_class, mock_b2_class,
                           mock_mesh_class, mock_parser_class,
                           tmp_path):
 
@@ -56,6 +57,10 @@ def test_eirene_interface(mock_build_fort31, mock_eirene_class, mock_b2_class,
         "fnay": np.array([[1.0, 0.0], [0.0, 2.0]]),
     }
     mock_build_fort31.return_value.fort31 = fake_eirene.fort31
+    mock_flux_masks.return_value = (
+        fake_eirene.fort31["fnax"] != 0,
+        fake_eirene.fort31["fnay"] != 0,
+    )
 
     # Species parsing determines ns
     fake_parser.species = {"bulk_ions": ["D", "T", "He"]}  # ns = 3
@@ -99,8 +104,9 @@ def test_eirene_interface(mock_build_fort31, mock_eirene_class, mock_b2_class,
 @patch("neutral_coupling.genex_coupling.eirene_interface.triangle_mesh.triangle_mesh")
 @patch("neutral_coupling.genex_coupling.eirene_interface.B2IO.B2")
 @patch("neutral_coupling.genex_coupling.eirene_interface.eireneIO.eirene")
+@patch("neutral_coupling.genex_coupling.eirene_interface._flux_masks")
 def test_eirene_interface_reuses_existing_runtime_fort31(
-    mock_eirene_class, mock_b2_class, mock_mesh_class, mock_parser_class,
+    mock_flux_masks, mock_eirene_class, mock_b2_class, mock_mesh_class, mock_parser_class,
     tmp_path,
 ):
     runtime = tmp_path / "fort.31"
@@ -111,14 +117,21 @@ def test_eirene_interface_reuses_existing_runtime_fort31(
         "fnax": np.ones((4, 5)),
         "fnay": np.ones((4, 5)),
     }
+    valid_poloidal = np.zeros((4, 5), dtype=bool)
+    valid_radial = np.zeros((4, 5), dtype=bool)
+    valid_poloidal[1, 2] = True
+    valid_radial[2, 3] = True
+    mock_flux_masks.return_value = (valid_poloidal, valid_radial)
     parser = mock_parser_class.return_value
     parser.species = {"bulk_ions": ["D"]}
     parser.masses = {"bulk_ions": [2.0]}
 
-    eirene_interface(tmp_path, tmp_path)
+    _, _, pol_mask, rad_mask = eirene_interface(tmp_path, tmp_path)
 
     fake_eirene.read_ft31.assert_called_once_with(runtime, 4, 5, 1)
     fake_eirene.write_ft31.assert_not_called()
+    np.testing.assert_array_equal(pol_mask, ~valid_poloidal)
+    np.testing.assert_array_equal(rad_mask, ~valid_radial)
 
 
 def test_map_ion_temperatures_directly_to_triangles():

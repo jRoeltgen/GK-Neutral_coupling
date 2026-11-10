@@ -108,16 +108,10 @@ def main(args, deps=None):
     last_tau = -1
     # Precompute triangulation
     tri = build_triangulation(grid_r[in_plasma], grid_z[in_plasma])
-    eirene_weights = np.asarray(edat.fort46["volumes"], dtype=float).reshape(-1)
     genex_weights = genex_interface.get_genex_source_weights(
         genex_path, norm["R0"]
     )
-    conservative_mapper = ConservativeSourceMapper(
-        edat.triangle_mesh.incenter,
-        np.column_stack((grid_r[in_plasma], grid_z[in_plasma])),
-        eirene_weights,
-        genex_weights[in_plasma],
-    )
+    conservative_mapper = None
     boundary_mode = getattr(args, "boundary_flux_normalization", "surface")
     eirene_boundary = None
     boundary_groups = None
@@ -292,8 +286,30 @@ def main(args, deps=None):
                     f"complete output is in {output_file}; incomplete files "
                     f"remain in {eirene_path}"
                 )
+        # Source files and fort.46 are independent EIRENE outputs.
+        # load_extra_forts reads only the former, while conservative mapping
+        # requires the physical triangle volumes stored in fort.46 in both
+        # summed- and split-temperature modes.
+        edat.read_ft46(eirene_path / "fort.46")
         edat.load_extra_forts(eirene_path=eirene_path, coll_to_adjust=None,
                               convert_units=True)
+        if conservative_mapper is None:
+            try:
+                eirene_weights = np.asarray(
+                    edat.fort46["volumes"], dtype=float
+                ).reshape(-1)
+            except KeyError as error:
+                raise ValueError(
+                    "EIRENE fort.46 did not contain triangle volumes after "
+                    "a successful run; conservative source interpolation "
+                    "requires the 'volumes' field"
+                ) from error
+            conservative_mapper = ConservativeSourceMapper(
+                edat.triangle_mesh.incenter,
+                np.column_stack((grid_r[in_plasma], grid_z[in_plasma])),
+                eirene_weights,
+                genex_weights[in_plasma],
+            )
 
         interp_temperatures = None
         write_temperatures = False

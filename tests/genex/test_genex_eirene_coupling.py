@@ -147,6 +147,7 @@ def coupling_env(monkeypatch, tmp_path):
         Path(path).write_text("updated fort.31")
 
     edat.write_ft31 = MagicMock(side_effect=write_ft31)
+    edat.read_ft46 = MagicMock()
     edat.load_extra_forts = MagicMock()
 
     b2dat = MagicMock()
@@ -224,6 +225,26 @@ def test_main_single_iteration_success(coupling_env):
     )
     env["deps"].replace.assert_called_once()
     assert (env["args"].eirene_path / "eirene_sources_000000" / "fort.31").exists()
+
+
+def test_main_builds_conservative_mapper_after_loading_eirene_output(coupling_env):
+    env = coupling_env
+    env["edat"].fort46 = {}
+
+    def load_fort46(_path):
+        env["edat"].fort46["volumes"] = np.array([[2.0]])
+
+    env["edat"].read_ft46.side_effect = load_fort46
+
+    env["mod"].main(env["args"], deps=env["deps"])
+
+    env["edat"].read_ft46.assert_called_once_with(
+        env["args"].eirene_path / "fort.46"
+    )
+    env["mod"].ConservativeSourceMapper.assert_called_once()
+    np.testing.assert_array_equal(
+        env["mod"].ConservativeSourceMapper.call_args.args[2], [2.0]
+    )
 
 
 def test_restart_mapping_fails_for_changed_b2fgmtry(tmp_path, monkeypatch):

@@ -255,3 +255,26 @@ def test_checked_runner_writes_spatially_varying_fort46(tmp_path):
         )
         assert np.isfinite(temperature).all()
         assert np.ptp(temperature) > 0
+
+
+def test_checked_runner_writes_physical_axisymmetric_triangle_volumes(tmp_path):
+    runner = CheckedRunEirene()
+    runner.edat.triangle_mesh = SimpleNamespace(
+        nodes=np.array([[1.0, 0.0], [2.0, 0.0], [1.0, 1.0]]),
+        cells=np.array([[1, 2, 3]]),
+    )
+    parser = SimpleNamespace(species={
+        "atoms": ["D"], "molecules": ["D2"], "test_ions": ["D2+"]
+    })
+    filepath = tmp_path / "fort.46"
+
+    runner._write_checked_fort46(
+        filepath, parser, np.array([4.0 / 3.0]), np.array([1.0 / 3.0])
+    )
+
+    loaded = eirene()
+    loaded.read_ft46(filepath)
+    expected = 2.0 * np.pi * (4.0 / 3.0) * 0.5
+    np.testing.assert_allclose(
+        loaded.fort46["volumes"].reshape(-1), [expected], rtol=1e-6
+    )
