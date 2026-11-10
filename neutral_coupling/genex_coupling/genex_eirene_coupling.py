@@ -20,6 +20,7 @@ import numpy as np
 import dask
 import shutil
 import argparse
+import os
 import re
 import faulthandler
 import scipy.constants as pyconst
@@ -38,6 +39,187 @@ from .boundary_flux import (
 default_eirene_path = Path("/pscratch/sd/j/jonroelt/tcv_genex_coupling/coupled_run/")
 default_genex_path = Path("/pscratch/sd/j/jonroelt/source_testing/3D_source/branch_all_source_file_params/")
 default_stop = Path("/global/cfs/cdirs/m2116/solps-iter")
+
+CONFIG_DEFAULTS = {
+    "pid": None,
+    "pid_file": None,
+    "sum_temperatures": True,
+    "filepattern": "./input_sources",
+    "eirene_command": "eirobjx",
+    "genex_path": default_genex_path,
+    "eirene_path": default_eirene_path,
+    "max_timeouts": 1,
+    "eirene_time": 200,
+    "solpstop": default_stop,
+    "genex_time_index_override": False,
+    "genex_read_mode": "averaged",
+    "genex_read_attempts": 6,
+    "genex_retry_delay": 0.5,
+    "genex_retry_max_delay": 10.0,
+    "boundary_flux": {
+        "normalization": "surface",
+        "allow_misalignment": False,
+        "factor_min": 0.5,
+        "factor_max": 2.0,
+        "negligible_fraction": 0.01,
+        "radial_scaling": 1.0,
+    },
+}
+
+_PATH_KEYS = {"pid_file", "genex_path", "eirene_path", "solpstop", "filepattern"}
+
+
+def _expand_config_value(value, config_dir):
+    """Expand environment variables and resolve configured filesystem paths."""
+    if not isinstance(value, str):
+        return value
+    expanded = os.path.expandvars(value)
+    if re.search(r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*", expanded):
+        raise ValueError(f"configuration references an unset environment variable: {value}")
+    path = Path(expanded).expanduser()
+    return path if path.is_absolute() else config_dir / path
+
+
+def load_coupling_config(path):
+    """Load and validate the public coupling YAML schema."""
+    try:
+        import yaml
+    except ImportError as error:
+        raise RuntimeError(
+            "YAML configuration requires PyYAML; install neutral-coupling[genex]"
+        ) from error
+
+    path = Path(path).resolve()
+    try:
+        with path.open(encoding="utf-8") as stream:
+            data = yaml.safe_load(stream)
+    except yaml.YAMLError as error:
+        raise ValueError(f"invalid YAML in {path}: {error}") from error
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ValueError("coupling configuration must be a YAML mapping")
+
+    unknown = set(data) - set(CONFIG_DEFAULTS)
+    if unknown:
+        raise ValueError(f"unknown coupling configuration keys: {sorted(unknown)}")
+    boundary = data.get("boundary_flux", {})
+    if not isinstance(boundary, dict):
+        raise ValueError("boundary_flux must be a YAML mapping")
+    unknown_boundary = set(boundary) - set(CONFIG_DEFAULTS["boundary_flux"])
+    if unknown_boundary:
+        raise ValueError(
+            f"unknown boundary_flux configuration keys: {sorted(unknown_boundary)}"
+        )
+
+    values = {**CONFIG_DEFAULTS, **data}
+    values["boundary_flux"] = {**CONFIG_DEFAULTS["boundary_flux"], **boundary}
+    expected = {
+        "pid": (int, type(None)), "pid_file": (str, Path, type(None)),
+        "sum_temperatures": (bool,), "filepattern": (str, Path),
+        "eirene_command": (str,), "genex_path": (str, Path),
+        "eirene_path": (str, Path), "max_timeouts": (int,),
+        "eirene_time": (int, float), "solpstop": (str, Path),
+        "genex_time_index_override": (bool,), "genex_read_mode": (str,),
+        "genex_read_attempts": (int,),
+        "genex_retry_delay": (int, float),
+        "genex_retry_max_delay": (int, float),
+    }
+    for key, types in expected.items():
+        if not isinstance(values[key], types) or (
+                bool not in types and isinstance(values[key], bool)):
+            raise ValueError(f"{key} has the wrong type")
+    boundary_expected = {
+        "normalization": (str,), "allow_misalignment": (bool,),
+        "factor_min": (int, float), "factor_max": (int, float),
+        "negligible_fraction": (int, float),
+        "radial_scaling": (int, float),
+    }
+    for key, types in boundary_expected.items():
+        value = values["boundary_flux"][key]
+        if not isinstance(value, types) or (
+                bool not in types and isinstance(value, bool)):
+            raise ValueError(f"boundary_flux.{key} has the wrong type")
+    for key in _PATH_KEYS:
+        if values[key] is not None:
+            values[key] = _expand_config_value(values[key], path.parent)
+    command = values["eirene_command"]
+    if "/" in command:
+        values["eirene_command"] = str(
+            _expand_config_value(command, path.parent)
+        )
+    return values
+
+
+def _config_namespace(values):
+    """Translate public YAML names to the legacy namespace consumed by main."""
+    boundary = values["boundary_flux"]
+    return SimpleNamespace(
+        pid=values["pid"], pid_file=values["pid_file"],
+        SumTemp=values["sum_temperatures"], filepattern=values["filepattern"],
+        eirene_command=values["eirene_command"],
+        genex_path=values["genex_path"], eirene_path=values["eirene_path"],
+        MAX_TIMEOUTS=values["max_timeouts"], eirene_time=values["eirene_time"],
+        solpstop=values["solpstop"],
+        genex_time_index_override=values["genex_time_index_override"],
+        genex_read_mode=values["genex_read_mode"],
+        genex_read_attempts=values["genex_read_attempts"],
+        genex_retry_delay=values["genex_retry_delay"],
+        genex_retry_max_delay=values["genex_retry_max_delay"],
+        boundary_flux_normalization=boundary["normalization"],
+        allow_boundary_misalignment=boundary["allow_misalignment"],
+        boundary_flux_factor_min=boundary["factor_min"],
+        boundary_flux_factor_max=boundary["factor_max"],
+        boundary_flux_negligible_fraction=boundary["negligible_fraction"],
+        radial_flux_scaling=boundary["radial_scaling"],
+    )
+
+
+def coupling_args_from_file(path):
+    """Return a validated coupling namespace from a YAML file."""
+    args = _config_namespace(load_coupling_config(path))
+    _validate_args(args)
+    return args
+
+
+def _validate_args(args, error=ValueError):
+    """Apply common validation to YAML and command-line configurations."""
+    if args.genex_read_mode not in ("averaged", "full"):
+        raise error("genex_read_mode must be 'averaged' or 'full'")
+    if args.boundary_flux_normalization not in ("surface", "off"):
+        raise error("boundary flux normalization must be 'surface' or 'off'")
+    if args.MAX_TIMEOUTS < 1 or args.eirene_time <= 0:
+        raise error("max_timeouts and eirene_time must be positive")
+    if args.genex_read_attempts < 1:
+        raise error("genex_read_attempts must be positive")
+    if args.genex_retry_delay < 0 or args.genex_retry_max_delay < 0:
+        raise error("GENE-X retry delays must be non-negative")
+    if args.boundary_flux_factor_min <= 0:
+        raise error("boundary flux factor minimum must be positive")
+    if args.boundary_flux_factor_max < args.boundary_flux_factor_min:
+        raise error("boundary flux factor maximum must be >= minimum")
+    if (not np.isfinite(args.boundary_flux_negligible_fraction)
+            or not 0 <= args.boundary_flux_negligible_fraction <= 1):
+        raise error("boundary flux negligible fraction must be finite and in [0, 1]")
+    if not np.isfinite(args.radial_flux_scaling) or args.radial_flux_scaling < 0:
+        raise error("radial flux scaling must be finite and non-negative")
+
+
+def resolve_pid(args):
+    """Resolve and validate a configured PID or PID file."""
+    if args.pid is None:
+        pid_file = getattr(args, "pid_file", None)
+        if pid_file is None:
+            pid_file = Path(args.genex_path) / "genex.pid"
+        try:
+            args.pid = int(Path(pid_file).read_text().strip())
+        except (OSError, ValueError) as error:
+            raise ValueError(f"could not read a valid GENE-X PID from {pid_file}") from error
+    if args.pid <= 0:
+        raise ValueError("GENE-X PID must be a positive integer")
+    if not psutil.pid_exists(args.pid):
+        raise ValueError(f"GENE-X process {args.pid} is not running")
+    return args
 
 def main(args, deps=None):
     faulthandler.enable(all_threads=True)
@@ -264,6 +446,7 @@ def main(args, deps=None):
                 eirene_time,
                 eirene_path=eirene_path,
                 command=args.eirene_command,
+                solpstop=getattr(args, "solpstop", default_stop),
                 output_file=output_file,
             )
             if eirene_status == status.SUCCESS:
@@ -984,11 +1167,28 @@ def next_eirene_index(eirene_path, filepattern):
 
     return max_index + 1
 
-def cli():
-    """Run the GENE-X–EIRENE coupling command."""
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    normalized = value.lower()
+    if normalized in ("true", "yes", "1"):
+        return True
+    if normalized in ("false", "no", "0"):
+        return False
+    raise argparse.ArgumentTypeError("expected true or false")
+
+
+def build_argument_parser():
     parser = argparse.ArgumentParser(prog="genex_eirene_coupling", description="Couple Gene-X and Eirene throught I/O and interpolate onto the other's grid")
+    parser.add_argument("--config", type=Path,
+                        help="YAML coupling configuration. If omitted, "
+                             "coupling.yaml in the current directory is used "
+                             "when present.")
     parser.add_argument("--pid", type=int, help="Gene-X Process ID")
-    parser.add_argument("--SumTemp", type=bool, default=True,
+    parser.add_argument("--pid-file", type=Path,
+                        help="File containing the GENE-X process ID. Defaults "
+                             "to genex.pid in the GENE-X run directory.")
+    parser.add_argument("--SumTemp", type=_as_bool, default=True,
                         help="Sums sources over collisions if true")
     parser.add_argument("--filepattern", type=str, default="./input_sources",
                         help="File path and name (without extension) of "
@@ -1008,7 +1208,7 @@ def cli():
     parser.add_argument("--solpstop", type=str, default=default_stop,
                         help="Path to top of solps directory tree as expected "
                         "by Eirene. For reaction paths.")
-    parser.add_argument("--genex_time_index_override", type=bool, default=False,
+    parser.add_argument("--genex_time_index_override", type=_as_bool, default=False,
                         help="Internal/testing only. Overrides GENE-X time selection. "
                             "Default (False) selects latest time slice. "
                             "Changing this alters coupling semantics and should "
@@ -1056,18 +1256,41 @@ def cli():
         help="Additional multiplier for normalized radial boundary fluxes "
              "(default: 1, no additional scaling).",
     )
-    args = parser.parse_args()
-    if args.boundary_flux_factor_min <= 0:
-        parser.error("--boundary-flux-factor-min must be positive")
-    if args.boundary_flux_factor_max < args.boundary_flux_factor_min:
-        parser.error("boundary flux factor maximum must be >= minimum")
-    if (not np.isfinite(args.boundary_flux_negligible_fraction)
-            or not 0 <= args.boundary_flux_negligible_fraction <= 1):
-        parser.error(
-            "--boundary-flux-negligible-fraction must be finite and in [0, 1]"
-        )
-    if not np.isfinite(args.radial_flux_scaling) or args.radial_flux_scaling < 0:
-        parser.error("--radial-flux-scaling must be finite and non-negative")
+    return parser
+
+
+def parse_coupling_args(argv=None):
+    """Parse CLI arguments, loading authoritative YAML when available."""
+    parser = build_argument_parser()
+    cli_args = parser.parse_args(argv)
+    config_path = cli_args.config
+    if config_path is None:
+        candidate = Path.cwd() / "coupling.yaml"
+        if candidate.is_file():
+            config_path = candidate
+    if config_path is not None:
+        try:
+            args = coupling_args_from_file(config_path)
+        except (OSError, RuntimeError, ValueError) as error:
+            parser.error(str(error))
+        args.config = Path(config_path).resolve()
+    else:
+        args = cli_args
+    try:
+        _validate_args(args)
+    except (TypeError, ValueError) as error:
+        parser.error(str(error))
+    return args
+
+
+def cli():
+    """Run the GENE-X–EIRENE coupling command."""
+    parser = build_argument_parser()
+    args = parse_coupling_args()
+    try:
+        resolve_pid(args)
+    except ValueError as error:
+        parser.error(str(error))
     main(args)
 
 

@@ -101,8 +101,7 @@ test_full_coupling(
         'molecule-plasma',
         'testion-plasma',
     ),
-    genex_path=os.environ['GENEX_PATH'],
-    eirene_path=os.environ['EIRENE_PATH'],
+    coupling_config='coupling_multiple_temps.yaml',
 )
 "; then
     "$SCRIPT_DIR/verify_and_retain_mesh.sh" "$RUN_DIR" "$SCRIPT_DIR" "$SCRATCH_ROOT" || exit $?

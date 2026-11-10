@@ -1,0 +1,65 @@
+# Gene-X Process ID. Normally omit this and use pid_file instead.
+pid: null
+
+# File containing the GENE-X process ID.
+pid_file: ./genex.pid
+
+# Sums sources over collisions when true.
+sum_temperatures: true
+
+# File path and name, without extension, expected by GENE-X for source files.
+filepattern: ./input_sources
+
+# Command to run as the neutral code. Primarily used here for testing.
+eirene_command: pwd
+
+# Path to the GENE-X run directory.
+genex_path: ${GENEX_PATH}
+
+# Path to the EIRENE run directory.
+eirene_path: .
+
+# Maximum number of EIRENE timeouts before the coupling fails.
+max_timeouts: 1
+
+# Number of seconds to allow EIRENE to run.
+eirene_time: 1
+
+# Path to the top of the SOLPS directory tree expected by EIRENE for reactions.
+solpstop: /global/cfs/cdirs/m2116/solps-iter
+
+# Internal/testing only. False selects the latest GENE-X time slice.
+# Changing this alters coupling semantics and must not be used in production.
+genex_time_index_override: false
+
+# Materialize toroidally averaged fields or load the full selected 3-D timestep.
+genex_read_mode: averaged
+
+# Maximum number of fresh-file attempts after HDF errors.
+genex_read_attempts: 6
+
+# Initial HDF retry delay in seconds.
+genex_retry_delay: 0.5
+
+# Maximum HDF retry delay in seconds.
+genex_retry_max_delay: 10.0
+
+boundary_flux:
+  # Conserve outgoing particle flux per matched boundary surface, or disable it.
+  normalization: surface
+
+  # Permit coarse-grid boundary matches beyond the normal distance limit.
+  # Intended for testing; all such matches are still reported.
+  allow_misalignment: true
+
+  # Smallest accepted boundary normalization factor.
+  factor_min: 0.5
+
+  # Largest accepted boundary normalization factor.
+  factor_max: 2.0
+
+  # Accept zero GENE-X outward flux below this fraction of the largest gross flux.
+  negligible_fraction: 0.01
+
+  # Additional multiplier for normalized radial boundary fluxes.
+  radial_scaling: 1.0

@@ -302,10 +302,11 @@ def run_eirene(Eirene_time, eirene_path, command="eirobjx", solpstop="",
     try:
         with open(output_file, "w") as outfile:
             env = os.environ.copy()
-            env["SOLPSTOP"] = solpstop
+            env["SOLPSTOP"] = str(solpstop)
             proc = subprocess.Popen([command], stdout=outfile,
                                     stderr=subprocess.STDOUT,
                                     text=True, cwd=eirene_path,
+                                    env=env,
                                     preexec_fn=os.setsid)
             try:
                 proc.wait(timeout=Eirene_time)

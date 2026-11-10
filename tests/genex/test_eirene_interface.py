@@ -511,6 +511,18 @@ def test_run_eirene_success(mock_popen, tmp_path):
     assert result == status.SUCCESS
     mock_popen.assert_called_once()
 
+
+@patch("neutral_coupling.genex_coupling.eirene_interface.subprocess.Popen")
+def test_run_eirene_passes_solpstop_environment(mock_popen, tmp_path):
+    mock_proc = mock_popen.return_value
+    mock_proc.wait.return_value = None
+    mock_proc.returncode = 0
+
+    result = run_eirene(10, tmp_path, solpstop="/opt/solps")
+
+    assert result == status.SUCCESS
+    assert mock_popen.call_args.kwargs["env"]["SOLPSTOP"] == "/opt/solps"
+
 @patch("neutral_coupling.genex_coupling.eirene_interface.subprocess.Popen")
 def test_run_eirene_failure_reports_metadata_only(mock_popen, tmp_path, capsys):
     mock_proc = mock_popen.return_value

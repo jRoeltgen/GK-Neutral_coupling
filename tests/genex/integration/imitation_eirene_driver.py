@@ -1,7 +1,11 @@
 import numpy as np
 from pathlib import Path
 from neutral_coupling.genex_coupling.write_netcdf import write_sources_nc
-from neutral_coupling.genex_coupling.genex_eirene_coupling import main
+from neutral_coupling.genex_coupling.genex_eirene_coupling import (
+    coupling_args_from_file,
+    main,
+    resolve_pid,
+)
 from neutral_coupling.common.temperature_mapping_utils import (
     default_single_species_pseudo_temperature_handler,
     default_sparse_temperature_handler,
@@ -35,6 +39,7 @@ def test_full_coupling(
     genex_path = "/pscratch/sd/j/jonroelt/source_testing/3D_source/full_workflow_test",
     eirene_path = None,
     read_mode="averaged",
+    coupling_config=None,
 ):
     """
     Test of full coupling with analytic replacement of Eirene. Checks that files
@@ -43,20 +48,29 @@ def test_full_coupling(
     If temperature_mode="multiple_temperatures", checks that the multiple
     temperatures are loaded into GENE-X (by change in density).
 
-    tmp_path - Where the sources are written to
-    override - If true, overrides selection of time slice in GENE-X data. True
-            selects a monotonically increasing time slice starting at 1, so
-            GENE-X can be replaced with an already created set of data.
+    tmp_path, override, genex_path, eirene_path, read_mode - Legacy test-helper
+            parameters retained for local launchers. Coupling values now come
+            from coupling_config so the same configuration path is tested as
+            production.
     temperature_mode - Whether to sum sources or split by temperature
     collision_types - Which Eirene collision types to use (i.e. atom-plasma)
-    genex_path - Full path directory with GENE-X run data
-    eirene_path - Full path to directory with eirene input files.
+    coupling_config - Complete YAML input for the coupling.
     """
     from types import SimpleNamespace
     print("=== PYTHON ENTRY REACHED ===", flush=True)
-    pid = int(Path("genex.pid").read_text())
-    if eirene_path == None:
-        eirene_path = genex_path + "/eirene_setup_files"
+    if coupling_config is None:
+        coupling_config = (
+            "coupling_multiple_temps.yaml"
+            if temperature_mode == "multiple_temperatures"
+            else "coupling_summed_temp.yaml"
+        )
+    args = coupling_args_from_file(Path(coupling_config))
+    resolve_pid(args)
+    pid = args.pid
+    genex_path = str(args.genex_path)
+    eirene_path = str(args.eirene_path)
+    override = args.genex_time_index_override
+    read_mode = args.genex_read_mode
 
     if temperature_mode == "multiple_temperatures":
         collision_types = validate_temperature_collisions(
@@ -73,22 +87,8 @@ def test_full_coupling(
     )
     print(f"Using file from genex_path: {genex_path}", flush=True)
     try:
-        args = SimpleNamespace(
-            pid=pid,
-            MAX_TIMEOUTS=1,
-            eirene_time=1,
-            SumTemp=temperature_mode == "summed",
-            filepattern=tmp_path + "input_sources",
-            genex_time_index_override=override,
-            genex_path=genex_path,
-            eirene_path=eirene_path,
-            eirene_command="pwd",
-            genex_read_mode=read_mode,
-            genex_read_attempts=6,
-            genex_retry_delay=0.5,
-            genex_retry_max_delay=10.0,
-            allow_boundary_misalignment=True,
-        )
+        if args.SumTemp != (temperature_mode == "summed"):
+            raise ValueError("temperature_mode does not match coupling YAML")
 
         deps = SimpleNamespace(
             run_eirene=checked_runner,

@@ -23,6 +23,30 @@ These editable installs make `neutral_coupling` importable without modifying
 
 Backend-independent EIRENE modules are in `neutral_coupling/common`.
 
+## GENE-X coupling configuration
+
+The GENE-X/EIRENE driver accepts a hand-editable YAML input file:
+
+```bash
+genex-eirene-coupling --config coupling.yaml
+```
+
+If `--config` is omitted, `coupling.yaml` in the current directory is loaded
+automatically when present. A loaded file is authoritative: ordinary coupling
+flags on the same command line are ignored. If no input file is available, the
+existing command-line arguments and defaults remain in effect.
+
+Relative filesystem paths are resolved from the YAML file's directory, and
+environment variables such as `${GENEX_PATH}` are expanded. Referencing an
+unset variable, misspelling a setting, or supplying a value of the wrong type
+is an error. The process ID can be supplied as `pid`, read from `pid_file`, or
+discovered from `genex.pid` in `genex_path`.
+
+Complete commented examples are provided by the two integration configurations
+in `tests/genex/integration/input_files`. A production-oriented example based
+on the TCV-X21 run is installed as
+`neutral_coupling/genex_coupling/coupling_tcv_x21.example.yaml`.
+
 ## Creating an initial `fort.31`
 
 An initial EIRENE plasma-background file can be generated without a B2 state:

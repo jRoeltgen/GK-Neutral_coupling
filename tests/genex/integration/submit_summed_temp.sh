@@ -95,8 +95,7 @@ from imitation_eirene_driver import test_full_coupling
 test_full_coupling(
     './',
     False,
-    genex_path=os.environ['GENEX_PATH'],
-    eirene_path=os.environ['EIRENE_PATH'],
+    coupling_config='coupling_summed_temp.yaml',
 )
 "; then
     "$SCRIPT_DIR/verify_and_retain_mesh.sh" "$RUN_DIR" "$SCRIPT_DIR" "$SCRATCH_ROOT" || exit $?

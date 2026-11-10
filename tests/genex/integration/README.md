@@ -42,6 +42,12 @@ boundary mappings. Static geometry inputs such as `fort.30/33/34/35` are
 preserved. This makes reruns independent of whether the preceding job passed
 or failed.
 
+The launchers use `coupling_summed_temp.yaml` and
+`coupling_multiple_temps.yaml` in `input_files`. Both files explicitly list and
+describe every public coupling input, including default-valued settings, so
+they can also be copied as templates. `${GENEX_PATH}` is expanded at load time;
+other relative paths are interpreted from the YAML file's directory.
+
 Also update the `#SBATCH` account and email directives in each submission
 script for the target system.
 
