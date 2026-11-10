@@ -18,6 +18,7 @@ params_*out.txt
 notes.txt
 *.out
 *.log
+*.json
 profile-results/
 /analysis/output/
 tests/genex/integration/input_files/boundary_flux*
